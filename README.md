@@ -6,6 +6,75 @@
 
 This is an independently authored ARM64 port, **not OpenAI's official Codex Universal image**. Tool *presence* and selectable language versions are the target; exact package versions and behaviour need validation. It has **not been built or tested on your Orin**.
 
+## One-command install or update
+
+On a Jetson Orin with Docker, Docker Compose v2, and the NVIDIA container
+runtime already installed, run this **as your normal Docker-enabled user**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash
+```
+
+This is also the update command. The [public install.sh](install.sh) checks the
+ARM64 architecture, Docker prerequisites and NVIDIA runtime, then clones the
+repository (or runs `git pull --ff-only` on `main`), builds the image, and
+starts a persistent Docker container called **`jetson-codex`**. No manual
+`git clone` or `docker run` is required. Existing Codex and GitHub login
+volumes and the host-mounted workspace are retained.
+
+**Default is hardware mode:** GPU via NVIDIA runtime, plus detected
+`/dev/video*`, `/dev/i2c-*`, `/dev/gpiochip*`, USB serial devices and
+`/tmp/argus_socket` when present. Not all Jetson interfaces are covered by
+these mappings; camera functionality still depends on host drivers and
+libraries. It does **not** use `--privileged`.
+
+Alternatives:
+
+```bash
+# Compose-managed container, NVIDIA GPU but no additional host devices
+curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --gpu-only
+
+# Update the repo and restart using an image already built successfully
+curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --no-build
+```
+
+The installer can recreate an existing `jetson-codex` container when
+deploying an update, which interrupts any active processes inside it. It will
+**not** delete authentication volumes. It refuses to overwrite a directory
+that is not this checkout, a checkout with tracked local modifications, or
+an unrelated container with the same name. It does not install Docker or
+change the host's networking configuration.
+
+After the script completes:
+
+```bash
+docker exec -it jetson-codex bash -l
+```
+
+Inside the container, sign in to both services (once):
+
+```bash
+codex login --device-auth
+gh auth login --hostname github.com --git-protocol https --web
+gh auth setup-git
+codex
+```
+
+Codex device login: **https://auth.openai.com/codex/device**.
+GitHub CLI device login: **https://github.com/login/device**. Use the
+one-time codes printed in your terminal. These are two distinct identities;
+the installer does not capture or store either credential itself.
+
+**Security:** `curl | bash` executes code downloaded from the internet.
+Read [install.sh](install.sh) before running it, especially on a machine with
+hardware devices and a shared host network. If you prefer a reviewable
+download, use `curl -fsSLo install.sh
+https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh`,
+inspect it, then run `bash install.sh`.
+
+The full multi-language image is substantial, and remains unverified until
+the build and `/opt/jetson-codex/verify.sh` succeed on a real Jetson.
+
 ## Install (on your Orin)
 
 1. Ensure Docker, the Compose plugin, and the NVIDIA container runtime are installed: `docker compose version` and `docker info | grep -A3 Runtimes` (look for `nvidia`).
