@@ -42,6 +42,54 @@ Logins persist in a Docker named volume, shared by Compose and `run-hardware.sh`
 
 **Build resource warning:** this is deliberately huge. Compiling four PHP versions, Erlang, Ruby and loading five Python versions, 13 Rust toolchains, six JDKs etc takes substantial disk, RAM, CPU and time. NVMe recommended; limit other workloads. If the Orin memory is tight, build with extra swap or on an ARM64 builder while retaining this target architecture. Do not claim completion until the image builds and `verify.sh` passes.
 
+## JetPack Docker bridge networking
+
+JetPack 6.2 / L4T 36.4.3 omits the Linux `CONFIG_IP_NF_RAW` firewall
+table on some Jetson kernels. Docker Engine 28+ can fail while creating a
+**bridge-network endpoint**, *before* executing a Dockerfile `RUN` command:
+
+```text
+Unable to enable DIRECT ACCESS FILTERING - DROP rule
+iptables: can't initialize iptables table 'raw'
+```
+
+This repo avoids Docker's bridge for both **build** and **runtime**:
+`compose.yaml` sets `build.network: host`, grants the
+`network.host` build entitlement, and uses `network_mode: host`.
+`run-hardware.sh` also launches with `--network=host`.
+These choices are independent of CUDA / GPU device passthrough.
+
+On the Jetson, pull the fix then rebuild:
+
+```bash
+cd ~/jetson-codex
+git pull --ff-only
+docker compose build --progress=plain
+docker compose run --rm jetson-codex bash -l
+```
+
+**If BuildKit complains about the `network.host` entitlement** (including
+some Compose/Buildx combinations), build directly with Buildx:
+
+```bash
+docker buildx build --network=host --allow=network.host \
+  --platform linux/arm64 --load -t jetson-codex:jp62-full .
+docker compose run --rm --no-deps jetson-codex bash -l
+```
+
+An installed Docker Compose supporting build entitlements (2.27.1+) is
+required for the first method. The Buildx fallback may require the chosen
+builder daemon to permit `network.host`.
+
+**Security:** host networking shares the Jetson's network namespace. Services
+started inside the container can bind host interfaces and reach local services.
+Do not run untrusted code or expose development servers publicly. This
+workaround avoids weakening firewall isolation for every other Docker
+container on the machine.
+
+See [Docker's build networking reference](https://docs.docker.com/reference/compose-file/build/#network)
+and [the Jetson-specific Moby issue](https://github.com/moby/moby/issues/50149).
+
 ## Device access
 
 `docker compose run` grants the GPU via NVIDIA runtime, but does *not* grant cameras, GPIO, serial devices or I²C. For those use:
@@ -97,7 +145,7 @@ DeepStream 7.1 targets JetPack 6.1 / L4T 36.4.0 and is a separate installer/cont
 
 ## Security
 
-Codex is a privileged *developer* inside its container, not a host admin. Avoid mounting `/var/run/docker.sock`, `/`, or `--privileged`, especially if running Codex without sandboxing. Binding hardware devices deliberately means code in this workspace can act on them. Do not bake tokens into the Dockerfile. `codex login --device-auth` uses an interactive login and stores credentials in the volume.
+Codex is a privileged *developer* inside its container, not a host admin. The default launch shares the Jetson's network namespace to work around the JetPack kernel issue. Avoid mounting `/var/run/docker.sock`, `/`, or `--privileged`, especially if running Codex without sandboxing. Binding hardware devices deliberately means code in this workspace can act on them. Do not bake tokens into the Dockerfile. `codex login --device-auth` uses an interactive login and stores credentials in the volume.
 
 ## References
 
