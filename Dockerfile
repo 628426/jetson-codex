@@ -3,6 +3,8 @@
 # Target host: Jetson Orin, JetPack 6.2 / L4T 36.4.3.
 # NOT a rebuild of OpenAI's official image; this is an independently maintained port.
 ARG JETPACK_IMAGE=nvcr.io/nvidia/l4t-jetpack:r36.4.0
+# Official static ARM64 mise binary, avoiding a build-time dependency on mise.run DNS.
+FROM ghcr.io/jdx/mise:2026.10.4 AS mise-binary
 FROM ${JETPACK_IMAGE}
 
 SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
@@ -41,8 +43,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     v4l-utils wget xz-utils yasm zip zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Official GitHub CLI APT repository, which ships current ARM64 builds.
+RUN install -dm 0755 /etc/apt/keyrings \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod 0644 /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && printf 'deb [arch=%s signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' "$(dpkg --print-architecture)" \
+      > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/* \
+    && gh --version
+
 # mise handles multiple versions of runtimes, with persistent shims in PATH.
-RUN curl -fsSL https://mise.run | sh && mise --version
+# The official container contains /usr/local/bin/mise (static musl build).
+COPY --from=mise-binary /usr/local/bin/mise /usr/local/bin/mise
+RUN mise --version
 
 # Python: all versions in the upstream Codex Universal Dockerfile.
 ARG PYTHON_VERSIONS="3.10 3.11.12 3.12 3.13 3.14.0"
