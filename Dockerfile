@@ -1,0 +1,166 @@
+# syntax=docker/dockerfile:1.7
+# One ARM64 environment: native NVIDIA JetPack libraries + Codex Universal's toolchain inventory.
+# Target host: Jetson Orin, JetPack 6.2 / L4T 36.4.3.
+# NOT a rebuild of OpenAI's official image; this is an independently maintained port.
+ARG JETPACK_IMAGE=nvcr.io/nvidia/l4t-jetpack:r36.4.0
+FROM ${JETPACK_IMAGE}
+
+SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    HOME=/root \
+    PIPX_BIN_DIR=/usr/local/bin \
+    PIPX_HOME=/opt/pipx \
+    MISE_TRUSTED_CONFIG_PATHS=/root/.config/mise \
+    CARGO_HOME=/root/.cargo \
+    RUSTUP_HOME=/root/.rustup \
+    PHPENV_ROOT=/root/.phpenv \
+    SWIFTLY_HOME_DIR=/root/.local/share/swiftly \
+    UV_NO_PROGRESS=1
+ENV PATH="/root/.phpenv/shims:/root/.phpenv/bin:/root/.local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.swiftly/bin:/usr/local/cuda/bin:${PATH}"
+
+# Jammy (Ubuntu 22.04) packages, intentionally NOT Ubuntu 24.04 exact-version pins.
+# Never run apt full-upgrade inside JetPack; it may alter the NVIDIA BSP userland.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autoconf automake bash-completion binutils bison build-essential \
+    ca-certificates ccache clang clang-format clang-tidy cmake curl \
+    default-libmysqlclient-dev dnsutils fd-find ffmpeg file gawk gdb \
+    gettext git git-lfs gnupg gpg gstreamer1.0-tools \
+    gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    i2c-tools inotify-tools iputils-ping jq libatomic1 \
+    libbz2-dev libcurl4-openssl-dev libdb-dev libedit-dev libffi-dev \
+    libgd-dev libgdbm-compat-dev libgdbm-dev libgmp-dev libicu-dev \
+    libjpeg-dev liblzma-dev libncurses-dev libnss3-dev libonig-dev \
+    libpng-dev libpq-dev libreadline-dev libsqlite3-dev libssl-dev \
+    libtidy-dev libunwind-dev libxml2-dev libxslt1-dev libyaml-dev \
+    libzip-dev libz3-dev lsb-release make moreutils nasm netcat-openbsd \
+    ninja-build openssh-client patch perl pipx pkg-config procps \
+    protobuf-compiler python3-dev python3-pip python3-venv re2c rsync \
+    software-properties-common sqlite3 sudo swig tk-dev tmux \
+    tzdata universal-ctags unixodbc-dev unzip usbutils uuid-dev \
+    v4l-utils wget xz-utils yasm zip zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# mise handles multiple versions of runtimes, with persistent shims in PATH.
+RUN curl -fsSL https://mise.run | sh && mise --version
+
+# Python: all versions in the upstream Codex Universal Dockerfile.
+ARG PYTHON_VERSIONS="3.10 3.11.12 3.12 3.13 3.14.0"
+RUN for v in ${PYTHON_VERSIONS}; do mise install "python@${v}"; done \
+    && mise use --global python@3.12 \
+    && for v in ${PYTHON_VERSIONS}; do \
+         mise exec "python@${v}" -- python -m ensurepip --upgrade; \
+         mise exec "python@${v}" -- python -m pip install --no-cache-dir \
+           ruff black mypy pyright isort pytest; \
+       done
+RUN pipx install poetry && pipx install uv && pipx install cpplint \
+    && pipx install cmakelang
+
+# Node: upstream builds 18, 20, 22, 24, with formatter/linter tools.
+ARG NODE_VERSIONS="18 20 22 24"
+RUN for v in ${NODE_VERSIONS}; do \
+      mise install "node@${v}"; \
+      mise exec "node@${v}" -- npm install --global \
+        typescript eslint prettier pnpm@10.12.1 yarn@1.22.22; \
+    done \
+    && mise use --global node@22
+
+# Install Codex as an actual standalone native ARM64 executable.
+# This remains callable even after changing the default Node version.
+ARG CODEX_RELEASE=latest
+RUN curl -fLSs "https://github.com/openai/codex/releases/${CODEX_RELEASE}/download/codex-aarch64-unknown-linux-musl.tar.gz" \
+      -o /tmp/codex.tar.gz \
+    && tar -xzf /tmp/codex.tar.gz -C /usr/local/bin \
+    && mv /usr/local/bin/codex-aarch64-unknown-linux-musl /usr/local/bin/codex \
+    && chmod 0755 /usr/local/bin/codex \
+    && rm /tmp/codex.tar.gz \
+    && codex --version
+
+# Bun, as used by Codex Universal.
+RUN mise install bun@1.2.14 && mise use --global bun@1.2.14
+
+# Java, Gradle, Maven.  JDK 11 is intentionally excluded from the upstream
+# ARM64 version; the JDK 17/21-25 set is installed here.
+ARG JAVA_VERSIONS="25 24 23 22 21 17"
+RUN for v in ${JAVA_VERSIONS}; do mise install "java@${v}"; done \
+    && mise use --global java@21 \
+    && mise install gradle@8.14 maven@3.9.10 \
+    && mise use --global gradle@8.14 maven@3.9.10
+
+# Rust: complete upstream version matrix + rustfmt + clippy.
+ARG RUST_VERSIONS="1.95.0 1.94.0 1.93.0 1.92.0 1.91.1 1.90.0 1.89.0 1.88.0 1.87.0 1.86.0 1.85.1 1.84.1 1.83.0"
+RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+      | sh -s -- -y --profile minimal --default-toolchain none \
+    && for v in ${RUST_VERSIONS}; do \
+      rustup toolchain install "${v}" --profile minimal \
+        --component rustfmt --component clippy; \
+    done \
+    && rustup default 1.95.0
+
+# Go and golangci-lint.
+ARG GO_VERSIONS="1.25.1 1.24.3 1.23.8 1.22.12"
+RUN for v in ${GO_VERSIONS}; do mise install "go@${v}"; done \
+    && mise use --global go@1.25.1 \
+    && mise install golangci-lint@2.1.6 \
+    && mise use --global golangci-lint@2.1.6
+
+# Ruby, Erlang, Elixir.
+ARG RUBY_VERSIONS="3.4.4 3.3.8 3.2.3"
+RUN for v in ${RUBY_VERSIONS}; do mise install "ruby@${v}"; done \
+    && mise use --global ruby@3.4.4
+ENV KERL_CONFIGURE_OPTIONS="--without-wx --without-javac"
+RUN mise install erlang@27.1.2 \
+    && mise install elixir@1.18.3-otp-27 \
+    && mise use --global erlang@27.1.2 elixir@1.18.3-otp-27
+
+# Bazelisk / bazel. See upstream's pinned version and release naming.
+ARG BAZELISK_VERSION=v1.26.0
+RUN curl -fLSs \
+      "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-arm64" \
+      -o /usr/local/bin/bazelisk \
+    && chmod 0755 /usr/local/bin/bazelisk \
+    && ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
+
+# PHP versions require compilation. This is a major part of the build time.
+# Match upstream's 'snapshot' naming; they are NOT reproducible version pins.
+ARG INSTALL_PHP=1
+ARG PHP_VERSIONS="8.5 8.4 8.3 8.2"
+RUN if [[ "${INSTALL_PHP}" == "1" ]]; then \
+      git clone --depth 1 https://github.com/phpenv/phpenv.git "${PHPENV_ROOT}"; \
+      git clone --depth 1 https://github.com/php-build/php-build.git \
+        "${PHPENV_ROOT}/plugins/php-build"; \
+      for v in ${PHP_VERSIONS}; do \
+        MAKEFLAGS=-j2 phpenv install -s "${v}snapshot"; \
+      done; \
+      phpenv rehash; phpenv global 8.5snapshot; \
+      curl -fLSs https://getcomposer.org/installer -o /tmp/composer-setup.php; \
+      php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer; \
+      rm /tmp/composer-setup.php; \
+    fi
+
+# Swift is officially available for Ubuntu 22.04/aarch64, though OpenAI's
+# prebuilt codex-universal ARM64 image excludes it. Switch it off only if
+# your Jetson cannot successfully install these toolchains.
+ARG INSTALL_SWIFT=1
+ARG SWIFT_VERSIONS="5.10 6.1 6.2"
+RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
+      curl -fLSs https://download.swift.org/swiftly/linux/swiftly-aarch64.tar.gz \
+        -o /tmp/swiftly.tar.gz; \
+      mkdir -p /tmp/swiftly-extract; \
+      tar -xzf /tmp/swiftly.tar.gz -C /tmp/swiftly-extract; \
+      /tmp/swiftly-extract/swiftly init --quiet-shell-followup; \
+      source "${SWIFTLY_HOME_DIR}/env.sh"; \
+      for v in ${SWIFT_VERSIONS}; do swiftly install "${v}"; done; \
+      swiftly use 6.2; \
+      rm -rf /tmp/swiftly.tar.gz /tmp/swiftly-extract; \
+    fi
+
+# Native-device utilities are installed; device access is granted at runtime.
+COPY setup-versions.sh verify.sh entrypoint.sh /opt/jetson-codex/
+RUN chmod 0755 /opt/jetson-codex/*.sh \
+    && mkdir -p /workspace /root/.codex \
+    && printf '\n# Jetson Codex development tools\nexport PATH="/root/.phpenv/shims:/root/.phpenv/bin:/root/.local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.swiftly/bin:/usr/local/cuda/bin:$PATH"\n' >> /root/.bashrc
+ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=all
+WORKDIR /workspace
+ENTRYPOINT ["/opt/jetson-codex/entrypoint.sh"]
+CMD ["bash", "-l"]
