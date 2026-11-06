@@ -12,6 +12,7 @@ check() {
   fi
 }
 check 'Codex' codex --version
+check 'GitHub CLI' gh --version
 check 'CUDA compiler' nvcc --version
 check 'Python' python3 --version
 check 'Installed Pythons' mise ls python
