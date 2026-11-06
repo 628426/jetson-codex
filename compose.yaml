@@ -1,5 +1,6 @@
 services:
   jetson-codex:
+    container_name: jetson-codex
     image: jetson-codex:jp62-full
     build:
       context: .
@@ -14,6 +15,9 @@ services:
         INSTALL_SWIFT: "1"
     platform: linux/arm64
     runtime: nvidia
+    restart: unless-stopped
+    # Keep the container alive; enter on demand using docker exec.
+    command: ["sleep", "infinity"]
     # Avoid Docker bridge at runtime too (no ports are published by this service).
     network_mode: host
     stdin_open: true
@@ -24,11 +28,18 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: all
+      GIT_CONFIG_GLOBAL: /root/.config/git/config
     volumes:
       - ./workspace:/workspace
       - codex-auth:/root/.codex
+      - github-auth:/root/.config/gh
+      - git-config:/root/.config/git
     # Camera/serial/GPIO devices are deliberately not exposed by default.
     # See run-hardware.sh for opt-in hardware passthrough.
 volumes:
   codex-auth:
     name: jetson-codex-auth
+  github-auth:
+    name: jetson-github-auth
+  git-config:
+    name: jetson-git-config
