@@ -4,13 +4,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # JetPack 6.x kernel omits iptables raw; avoid Docker's bridge during build.
+      network: host
+      entitlements:
+        - network.host
       platforms: [linux/arm64]
       args:
         INSTALL_PHP: "1"
         INSTALL_SWIFT: "1"
     platform: linux/arm64
     runtime: nvidia
-    # Normal Docker networking suffices for outbound access to ChatGPT.
+    # Avoid Docker bridge at runtime too (no ports are published by this service).
+    network_mode: host
     stdin_open: true
     tty: true
     init: true
