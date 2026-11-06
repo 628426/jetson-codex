@@ -1,0 +1,6 @@
+workspace/
+.git/
+*.zip
+*.tar
+*.tar.gz
+.env
