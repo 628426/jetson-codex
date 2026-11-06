@@ -16,7 +16,8 @@ git clone https://github.com/628426/jetson-codex.git
 cd jetson-codex
 mkdir -p workspace
 docker compose build --progress=plain
-docker compose run --rm jetson-codex bash -l
+docker compose up -d --no-build
+docker exec -it jetson-codex bash -l
 ```
 
 3. In ChatGPT settings, ensure **device code login is enabled** under your security settings (or allowed by your workspace administrator). Then, inside the container, authenticate using **device-code login** (recommended for headless Jetsons):
@@ -38,9 +39,140 @@ codex
 You can now ask Codex to inspect `/workspace`, compile software and run hardware-facing tests. The ChatGPT sign-in uses your Codex entitlement, not a separately created OpenAI API key. An Internet connection is required for Codex's hosted reasoning.
 
 
-Logins persist in a Docker named volume, shared by Compose and `run-hardware.sh`.
+Codex login persists in the `jetson-codex-auth` Docker volume. GitHub CLI and Git credential settings persist separately in `jetson-github-auth` and `jetson-git-config`. Both startup methods use the same named volumes.
 
 **Build resource warning:** this is deliberately huge. Compiling four PHP versions, Erlang, Ruby and loading five Python versions, 13 Rust toolchains, six JDKs etc takes substantial disk, RAM, CPU and time. NVMe recommended; limit other workloads. If the Orin memory is tight, build with extra swap or on an ARM64 builder while retaining this target architecture. Do not claim completion until the image builds and `verify.sh` passes.
+
+## Start, attach, stop and restart the named container
+
+After a successful build, run these commands **on the Jetson host**:
+
+```bash
+cd ~/jetson-codex
+docker compose up -d --no-build
+docker ps --filter name=jetson-codex
+docker exec -it jetson-codex bash -l
+```
+
+This starts a persistent container **named `jetson-codex`**. It uses
+`sleep infinity` as its keepalive command, `restart: unless-stopped`
+for Jetson reboots, the NVIDIA runtime for GPU access, and host networking
+for JetPack's Docker firewall incompatibility. A shell opened with
+`docker exec` is independent: **`exit` leaves the container running.**
+
+From the Jetson host:
+
+```bash
+docker exec -it jetson-codex bash -l     # new shell
+docker exec -it jetson-codex codex       # run Codex directly
+docker logs --tail=100 jetson-codex      # container logs
+docker stop jetson-codex                # stop
+docker start jetson-codex               # start again
+docker compose down                     # remove container, keep named auth volumes
+```
+
+If you change the Dockerfile, run `docker compose build` and then
+`docker compose up -d --no-build --force-recreate`. `docker compose
+down -v` **deletes authentication volumes**, so don't use `-v` unless
+you deliberately intend to clear saved logins.
+
+### Authenticate Codex with ChatGPT
+
+Open a shell in the running container:
+
+```bash
+docker exec -it jetson-codex bash -l
+codex login --device-auth
+```
+
+Open **https://auth.openai.com/codex/device** on another device, sign in
+to your ChatGPT account, and enter the one-time code from the terminal.
+Follow the URL printed by Codex if it differs. Test with:
+
+```bash
+codex login status
+codex
+```
+
+### Authenticate the GitHub CLI with your GitHub account
+
+Codex authentication and GitHub authentication are **separate**. The
+container includes the official `gh` CLI and Git. In the container run:
+
+```bash
+gh auth login --hostname github.com --git-protocol https --web
+```
+
+Use the printed one-time code at **https://github.com/login/device** and
+approve the GitHub CLI authorisation for account `628426`. A browser
+inside the Jetson container is *not* required; open the URL on your
+desktop or phone. Then:
+
+```bash
+gh auth status
+gh auth setup-git
+gh repo view 628426/jetson-codex
+```
+
+`gh auth setup-git` makes authenticated Git operations use the GitHub
+CLI credential helper. Set the Git author identity to the name/email
+associated with your GitHub account before making commits:
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "your-verified-github-email"
+```
+
+The GitHub login lives in `jetson-github-auth`; your global Git config
+lives in `jetson-git-config`. They persist after `docker compose down`
+and image rebuilds, without embedding a token in the image or a public
+repository. GitHub CLI may store credentials in plain text inside that
+Docker volume when no system keyring is available; protect root access to
+your Jetson.
+
+Example development session:
+
+```bash
+docker exec -it jetson-codex bash -l
+cd /workspace
+gh repo clone 628426/jetson-codex
+cd jetson-codex
+codex
+```
+
+Codex can now use Git and `gh` in its local execution environment.
+It still uses your ChatGPT login for AI reasoning, and your GitHub
+authorisation for repository operations.
+
+## mise binary and DNS during Docker build
+
+An older Dockerfile fetched the mise installer from `https://mise.run`.
+If the Jetson or Docker build couldn't resolve that hostname, the build
+failed with `curl: (6) Could not resolve host: mise.run`, regardless of
+whether `apt-get` had succeeded. The current Dockerfile instead uses
+the official ARM64 binary from `ghcr.io/jdx/mise:2026.10.4` as a
+multi-stage `COPY`. No `mise.run` DNS lookup is needed.
+
+After pulling updates, rebuild:
+
+```bash
+cd ~/jetson-codex
+git pull --ff-only
+docker compose build --progress=plain
+```
+
+If fetching the official image **also** fails, check DNS/registry reachability
+from the Jetson host instead of changing Docker firewall rules blindly:
+
+```bash
+getent ahosts ghcr.io
+getent ahosts github.com
+getent ahosts cli.github.com
+docker buildx imagetools inspect ghcr.io/jdx/mise:2026.10.4
+```
+
+A successful pull from Docker Hub or NVIDIA NGC does not prove that
+every other registry or domain is reachable.
 
 ## JetPack Docker bridge networking
 
@@ -65,7 +197,8 @@ On the Jetson, pull the fix then rebuild:
 cd ~/jetson-codex
 git pull --ff-only
 docker compose build --progress=plain
-docker compose run --rm jetson-codex bash -l
+docker compose up -d --no-build
+docker exec -it jetson-codex bash -l
 ```
 
 **If BuildKit complains about the `network.host` entitlement** (including
@@ -74,7 +207,8 @@ some Compose/Buildx combinations), build directly with Buildx:
 ```bash
 docker buildx build --network=host --allow=network.host \
   --platform linux/arm64 --load -t jetson-codex:jp62-full .
-docker compose run --rm --no-deps jetson-codex bash -l
+docker compose up -d --no-build
+docker exec -it jetson-codex bash -l
 ```
 
 An installed Docker Compose supporting build entitlements (2.27.1+) is
@@ -92,14 +226,21 @@ and [the Jetson-specific Moby issue](https://github.com/moby/moby/issues/50149).
 
 ## Device access
 
-`docker compose run` grants the GPU via NVIDIA runtime, but does *not* grant cameras, GPIO, serial devices or I²C. For those use:
+The default Compose container grants the GPU via NVIDIA runtime, but does *not* grant cameras, GPIO, serial devices or I²C. To start a **named persistent container** with detected host hardware devices, stop/remove the Compose-created container *without deleting volumes* and use the optional hardware launcher:
 
 ```bash
+docker compose down
 chmod +x run-hardware.sh
 ./run-hardware.sh
+docker exec -it jetson-codex bash -l
 ```
 
-This inspects existing `/dev/video*`, `/dev/i2c-*`, `/dev/gpiochip*`, `/dev/ttyUSB*`, and `/dev/ttyACM*` nodes, and passes each into the container. CSI camera access may also require `/tmp/argus_socket`, which is mounted only if present. Access still depends on device permissions, driver compatibility, and the specific camera interface. It does **not** grant blanket `--privileged` access. Both launch methods use the same explicitly named `jetson-codex-auth` Docker volume.
+Both launch paths use the name `jetson-codex`, so only one may exist at once.
+The hardware script uses `-d` rather than `--rm`, retains credentials, and
+maps detected devices when the container is created. If you later attach new
+USB hardware, recreate the hardware container to refresh device mappings.
+
+The hardware script inspects existing `/dev/video*`, `/dev/i2c-*`, `/dev/gpiochip*`, `/dev/ttyUSB*`, and `/dev/ttyACM*` nodes, and passes each into the container. CSI camera access may also require `/tmp/argus_socket`, which is mounted only if present. Access still depends on device permissions, driver compatibility, and the specific camera interface. It does **not** grant blanket `--privileged` access. Both launch methods use the same explicitly named `jetson-codex-auth` Docker volume.
 
 ## Version selectors
 
@@ -116,7 +257,7 @@ CODEX_ENV_PHP_VERSION=8.5
 CODEX_ENV_SWIFT_VERSION=6.2
 ```
 
-Specify them with `docker compose run -e KEY=value ...` or in the `environment:` section. The values must be preinstalled by the Dockerfile.
+Specify them in the Compose `environment:` section (or as `docker run -e KEY=value ...` for a standalone launcher). The values must be preinstalled by the Dockerfile.
 
 ## Complete inventory targeted
 
@@ -151,6 +292,9 @@ Codex is a privileged *developer* inside its container, not a host admin. The de
 
 - https://github.com/openai/codex-universal/blob/main/Dockerfile
 - https://github.com/openai/codex
+- https://mise.jdx.dev/mise-cookbook/docker.html
+- https://cli.github.com/manual/gh_auth_login
+- https://cli.github.com/manual/gh_auth_setup-git
 - https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-jetpack
 - https://docs.nvidia.com/metropolis/deepstream/7.1/text/DS_Installation.html
 - https://www.swift.org/install/linux/ubuntu/22_04/
