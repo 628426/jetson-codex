@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$(realpath "$0")")"
 mkdir -p workspace
-args=(run --rm -it --name jetson-codex --runtime=nvidia --init
+args=(run --rm -it --name jetson-codex --runtime=nvidia --network=host --init
       --shm-size=1g -v "${PWD}/workspace:/workspace" -v jetson-codex-auth:/root/.codex
       -w /workspace -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all)
 # Only grant actual device nodes. No --privileged, --pid=host or Docker socket.
