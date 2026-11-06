@@ -1,0 +1,29 @@
+services:
+  jetson-codex:
+    image: jetson-codex:jp62-full
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms: [linux/arm64]
+      args:
+        INSTALL_PHP: "1"
+        INSTALL_SWIFT: "1"
+    platform: linux/arm64
+    runtime: nvidia
+    # Normal Docker networking suffices for outbound access to ChatGPT.
+    stdin_open: true
+    tty: true
+    init: true
+    shm_size: 1gb
+    working_dir: /workspace
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    volumes:
+      - ./workspace:/workspace
+      - codex-auth:/root/.codex
+    # Camera/serial/GPIO devices are deliberately not exposed by default.
+    # See run-hardware.sh for opt-in hardware passthrough.
+volumes:
+  codex-auth:
+    name: jetson-codex-auth
