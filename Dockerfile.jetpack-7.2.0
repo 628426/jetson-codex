@@ -53,11 +53,18 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libnvvpi4 vpi4-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Verify the NVIDIA runtime stack at build time (hardware execution at run time).
+# Verify installed NVIDIA libraries without short-circuiting ldconfig.
+# With pipefail, "ldconfig -p | grep -q" can return SIGPIPE (141) on a
+# successful match because grep stops reading before ldconfig finishes.
+# Save the complete list first so each check gives an accurate failure.
 RUN command -v nvcc \
-    && ldconfig -p | grep -q 'libnvinfer.so' \
-    && ldconfig -p | grep -q 'libcudnn.so' \
-    && ldconfig -p | grep -q 'libnvvpi.so' \
+    && ldconfig -p > /tmp/jetson-ldconfig.txt \
+    && for lib in libnvinfer.so libcudnn.so libnvvpi.so; do \
+         if ! grep -F "$lib" /tmp/jetson-ldconfig.txt >/dev/null; then \
+           echo "Missing NVIDIA SDK library: $lib" >&2; exit 1; \
+         fi; \
+       done \
+    && rm /tmp/jetson-ldconfig.txt \
     && test -d /opt/nvidia/deepstream \
     && command -v gst-inspect-1.0
 
