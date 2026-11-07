@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
 # One ARM64 environment: native NVIDIA JetPack libraries + Codex Universal's toolchain inventory.
-# Target host: Jetson Orin, JetPack 6.2 / L4T 36.4.3.
+# Target host: Jetson Orin, JetPack 7.2 / L4T 39.2.
 # NOT a rebuild of OpenAI's official image; this is an independently maintained port.
-ARG JETPACK_IMAGE=nvcr.io/nvidia/l4t-jetpack:r36.4.0
+ARG JETPACK_IMAGE=nvcr.io/nvidia/cuda:13.0.0-devel-ubuntu24.04
 # Official static ARM64 mise binary, avoiding a build-time dependency on mise.run DNS.
 FROM ghcr.io/jdx/mise:2026.10.4 AS mise-binary
 FROM ${JETPACK_IMAGE}
@@ -21,8 +21,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     UV_NO_PROGRESS=1
 ENV PATH="/root/.phpenv/shims:/root/.phpenv/bin:/root/.local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.swiftly/bin:/usr/local/cuda/bin:${PATH}"
 
-# Jammy (Ubuntu 22.04) packages, intentionally NOT Ubuntu 24.04 exact-version pins.
-# Never run apt full-upgrade inside JetPack; it may alter the NVIDIA BSP userland.
+# Noble (Ubuntu 24.04) packages. NVIDIA CUDA devel image is the documented
+# official JetPack 7-compatible base; TensorRT/VPI/DeepStream are NOT bundled.
+# Never upgrade the host BSP from inside a container.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     autoconf automake bash-completion binutils bison build-essential \
     ca-certificates ccache clang clang-format clang-tidy cmake curl \
