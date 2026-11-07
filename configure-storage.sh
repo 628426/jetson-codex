@@ -66,8 +66,9 @@ cat >/dev/tty <<'GUIDE'
 ========================================================
   CLOUD STORAGE: HEADLESS JETSON SETUP
 ========================================================
-  The Jetson has NO browser. This setup will never open
-  http://127.0.0.1 on the Jetson.
+  The Jetson has NO browser. Microsoft/Google expect
+  OAuth to return to localhost:53682. A direct LAN-IP
+  redirect would fail their registered OAuth callback.
 
   To link a new drive, install rclone on your Windows PC:
   https://rclone.org/downloads/
@@ -106,16 +107,25 @@ if [[ -z "$remote" ]]; then
     sudo apt-get install -y --no-install-recommends expect
   fi
   say "Starting rclone's normal provider setup."
-  say "When rclone asks 'Use auto config?', the installer will answer N automatically."
-  # Keep the rclone interactive wizard (including OneDrive drive selection),
-  # but force the ONLY browser-location prompt to N. 'rclone config create'
-  # is NOT sufficient on older rclone releases because it auto-confirms an
-  # empty verification code and can still launch 127.0.0.1 OAuth.
+  if [[ "${RCLONE_SSH_TUNNEL:-0}" == "1" ]]; then
+    export RCLONE_OAUTH_ANSWER=y
+    say "SSH OAuth forwarding is active. Open the printed localhost:53682 link in your PC browser."
+    say "Microsoft/Google return to localhost on the PC; SSH forwards that callback to the Jetson."
+  else
+    export RCLONE_OAUTH_ANSWER=n
+    say "No SSH OAuth tunnel requested; using the normal headless token handoff."
+    say "For one-click browser login, reconnect using the Windows SSH -L command in README.md."
+  fi
+  # Keep the interactive wizard (including OneDrive drive selection).
+  # Answer the browser-location question based on whether the client
+  # deliberately opened an SSH forward. The OAuth redirect URI is fixed
+  # at localhost:53682 by the provider registration, NOT the Jetson LAN IP.
   expect -c '
     set timeout -1
+    set answer $env(RCLONE_OAUTH_ANSWER)
     spawn -noecho rclone config
     interact -o -re {Use auto config\?|Use web browser to automatically authenticate rclone with remote\?} {
-      send -- "n\r"
+      send -- "$answer\r"
     }
     set result [wait]
     exit [lindex $result 3]
