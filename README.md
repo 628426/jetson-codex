@@ -81,21 +81,33 @@ the Jetson host filesystem, but the container uses host networking and
 passes through detected hardware devices. Only run trusted repositories
 and prompts with this setting.
 
-## Headless OAuth on SSH
+## Cloud account linking from a Windows PC
 
-Cloud linking now uses the normal `rclone config` wizard under a terminal
-automation wrapper. On a headless Jetson, **the installer automatically answers
-N** to `Use auto config?` (or the newer equivalent). This avoids incorrectly
-opening an OAuth callback on the Jetson's `127.0.0.1`.
+**Microsoft and Google require the OAuth redirect URI at
+`http://localhost:53682/`.** Changing it to the Jetson's LAN address will
+not work with rclone's shared OAuth application registrations. See
+[rclone's remote setup documentation](https://rclone.org/remote_setup/).
 
-Run the `rclone authorize ...` command shown by the Jetson on your **Windows
-PC**, complete Microsoft/Google sign-in in your browser, and paste the
-resulting token back into the SSH terminal. Rclone is needed on the PC for
-that one-time authorisation. Credentials are then persisted on the Jetson.
-The installer auto-installs the small `expect` CLI package for prompt handling.
+For the easiest *one-command* setup with no rclone installed on Windows,
+run this in **Windows PowerShell** instead of opening a separate SSH session:
 
-If setup was interrupted with Ctrl-C, rerun the **same installer command**.
-An existing linked remote can be reused without another OAuth flow.
+```powershell
+ssh -tt -L 53682:127.0.0.1:53682 dex@dexson 'RCLONE_SSH_TUNNEL=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh)"'
+```
+
+The installer runs on the Jetson as normal. During OneDrive/Google Drive
+setup, it automatically answers **Y** to rclone's browser prompt. Click
+the `http://127.0.0.1:53682/auth?state=...` URL in your **Windows browser**.
+The SSH connection forwards both the login page and OAuth callback to rclone
+on the Jetson. **No Windows rclone installation, token copying, or second
+terminal is needed.**
+
+The standard Jetson-side one-command installer remains supported, but
+without an SSH tunnel it must use rclone's conventional headless
+`rclone authorize` flow (requiring browser-enabled rclone elsewhere).
+Once linked, credentials persist on the host, so future runs do not
+require OAuth. If setup was interrupted, rerun and select an existing
+rclone remote if offered.
 
 ## Cloud-backed projects and repeatable health checks
 
