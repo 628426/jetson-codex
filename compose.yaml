@@ -27,6 +27,8 @@ services:
       GIT_CONFIG_GLOBAL: /root/.config/git/config
     volumes:
       - ./workspace:/workspace
+      - ${HOME}/jetson-codex-cloud:/workspace/projects:rslave
+      - ./workspace/source:/workspace/source
       - codex-auth:/root/.codex
       - github-auth:/root/.config/gh
       - git-config:/root/.config/git
