@@ -10,13 +10,15 @@ IMAGE=""
 DOCKERFILE=""
 CONTAINER="jetson-codex"
 MODE="hardware"
-BUILD=1
+BUILD=0
+FORCE_BUILD=0
+HEALTH_ONLY=0
 
 say() { printf '[jetson-codex] %s\n' "$*"; }
 fail() { printf '[jetson-codex] ERROR: %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--hardware | --gpu-only] [--no-build]
+Usage: install.sh [--hardware | --gpu-only] [--rebuild] [--check] [--no-build]
 
 On a Jetson Orin, clone/update the public repo, build its ARM64 image,
 and start a named persistent container.
@@ -24,7 +26,7 @@ and start a named persistent container.
   --hardware    Default. Map the detected camera, I2C, GPIO and USB serial
                 device nodes and the CSI Argus socket if present, plus GPU.
   --gpu-only    Use Docker Compose, with NVIDIA GPU but no extra device nodes.
-  --no-build    Reuse the existing image instead of rebuilding it.
+  --no-build    Require an existing image; do not build.\n  --rebuild     Force an image rebuild even when already present.\n  --check       Run read-only health checks without changing anything.
   -h, --help    Show this help.
 
 Optional: JETSON_CODEX_DIR overrides ~/jetson-codex.
@@ -39,7 +41,7 @@ while (( $# )); do
   case "$1" in
     --hardware) MODE="hardware" ;;
     --gpu-only) MODE="compose" ;;
-    --no-build) BUILD=0 ;;
+    --no-build) BUILD=0 ;;\n    --rebuild) FORCE_BUILD=1 ;;\n    --check) HEALTH_ONLY=1 ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown argument: $1 (use --help)" ;;
   esac
@@ -94,9 +96,24 @@ else
 fi
 
 cd "$REPO_DIR"
+if (( HEALTH_ONLY )); then exec bash ./healthcheck.sh; fi
 [[ -f "$DOCKERFILE" ]] || fail "Selected Dockerfile missing: $DOCKERFILE"
-mkdir -p workspace
-
+mkdir -p workspace workspace/source "$HOME/jetson-codex-cloud"
+if [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
+  say "Cloud storage is not configured."
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    printf "Configure OneDrive/Google Drive now? [y/N] " >/dev/tty
+    IFS= read -r answer </dev/tty || answer=n
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+      bash ./configure-storage.sh || say "Cloud setup incomplete; you can retry later."
+    fi
+  fi
+fi
+if [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
+  bash ./configure-storage.sh --mount || say "Cloud mount unavailable; health check will report this."
+fi
+if (( FORCE_BUILD )); then BUILD=1; fi
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then BUILD=1; fi
 if (( BUILD )); then
   say "Building full ARM64 JetPack + Codex image; this is a large build."
   if ! docker compose build --progress=plain; then
@@ -111,8 +128,12 @@ if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
   current_image="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")"
   [[ "$current_image" == "$IMAGE" ]] || fail "A container named '$CONTAINER' already exists using '$current_image'. Not replacing an unrelated container."
   if [[ "$MODE" == "hardware" ]]; then
-    say "Replacing existing $CONTAINER container to refresh hardware devices/image (named volumes are retained)."
-    docker rm -f "$CONTAINER" >/dev/null
+    if (( BUILD )) || ! docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
+      say "Refreshing hardware container (persistent volumes retained)."
+      docker rm -f "$CONTAINER" >/dev/null
+    else
+      say "Container already running; leaving it untouched."
+    fi
   else
     compose_service="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "$CONTAINER" 2>/dev/null || true)"
     if [[ "$compose_service" != "jetson-codex" ]]; then
@@ -123,8 +144,10 @@ if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
 fi
 
 if [[ "$MODE" == "hardware" ]]; then
-  say "Starting GPU + detected hardware devices via run-hardware.sh"
-  bash ./run-hardware.sh
+  if ! docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+    say "Starting GPU + detected hardware devices via run-hardware.sh"
+    bash ./run-hardware.sh
+  fi
 else
   say "Starting GPU-only Compose service"
   docker compose up -d --no-build
@@ -156,6 +179,9 @@ else
     say "No interactive terminal available. Run: docker exec -it jetson-codex codex login --device-auth"
   fi
 fi
+
+say "Running health checks"
+bash ./healthcheck.sh || say "Health checks reported issues; see output above."
 
 cat <<'DONE'
 
