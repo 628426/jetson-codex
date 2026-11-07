@@ -111,7 +111,26 @@ if [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
     printf "Configure OneDrive/Google Drive now? [y/N] " >/dev/tty
     IFS= read -r answer </dev/tty || answer=n
     if [[ "$answer" =~ ^[Yy]$ ]]; then
-      bash ./configure-storage.sh || say "Cloud setup incomplete; you can retry later."
+      if [[ "${RCLONE_SSH_TUNNEL:-0}" == "1" ]]; then
+        say "One-click OAuth tunnel detected. Starting browser linking."
+        bash ./configure-storage.sh || say "Cloud setup incomplete; rerun the installer to retry."
+      else
+        # OAuth's registered redirect is localhost:53682 on the browser PC.
+        # Display the exact one-command SSH forwarding invocation rather than
+        # sending users to install rclone on Windows and paste OAuth tokens.
+        server_ip=""
+        if [[ -n "${SSH_CONNECTION:-}" ]]; then
+          read -r _client _port server_ip _server_port <<< "$SSH_CONNECTION"
+        fi
+        if [[ "$server_ip" != *.* ]]; then
+          server_ip="$(hostname -I 2>/dev/null | awk '{ for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\\./) {print $i; exit} }')"
+        fi
+        server_ip="${server_ip:-$(hostname -s)}"
+        printf '\n%s\n' 'Run this ONE command in Windows PowerShell for one-click Microsoft/Google login:' >/dev/tty
+        printf 'ssh -tt -o ExitOnForwardFailure=yes -L 53682:127.0.0.1:53682 %s@%s %s\n' "$USER" "$server_ip" "'RCLONE_SSH_TUNNEL=1 bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh)\"'" >/dev/tty
+        printf '%s\n\n' 'Then open the localhost link rclone prints in your Windows browser. No Windows rclone or token copying.' >/dev/tty
+        say "Cloud OAuth deferred until the browser-enabled SSH session; continuing the rest of the install."
+      fi
     fi
   fi
 fi
