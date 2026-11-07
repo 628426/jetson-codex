@@ -206,6 +206,43 @@ Dockerfile changes. This avoids lengthy unexpected builds, but means
 updating the Dockerfile requires an explicit image rebuild outside the
 one-command path until image revision tracking is implemented.
 
+## Jetson accelerator passthrough and hardware verification
+
+The single installer now inventories **both the Jetson host and the running
+Docker container**. It explicitly maps only detected character devices
+through `--device`, including `/dev/nvhost*`, `/dev/nvmap`, NVIDIA
+render/GPU devices, cameras, media nodes, I²C, SPI, GPIO and USB serial.
+The NVIDIA container runtime supplies compatible GPU driver integration;
+the Argus camera socket is mounted when present.
+
+On every run, `install.sh`:
+
+1. Inventories eligible character devices on the host, without installing
+   multimedia/development packages.
+2. Compares those host nodes with **explicit Docker device mappings**, and
+   refreshes the container if a mapping is missing. Named credentials and
+   workspace volumes survive recreation.
+3. Compares the available host and container device nodes.
+4. Calls the CUDA **driver API** on both host and container and compares the
+   discovered GPU counts when the host supports the probe.
+5. Inside Docker, generates small H.264/H.265 clips with CPU FFmpeg encoders
+   and actually decodes them through GStreamer's `nvv4l2decoder`.
+   **An installed decoder plugin alone does not count as passing.**
+
+**Orin Nano 8GB has NVDEC and VIC, but no NVENC hardware encoder.**
+H.264/H.265 *decoding* uses the supported NVIDIA hardware when the smoke
+test passes. *Encoding* uses CPU `libx264` / `libx265` inside Docker.
+If your workload requires hardware encoding, the Orin Nano cannot provide
+it through any software or Docker passthrough change. The Orin NX has
+NVENC hardware, but requires different hardware and suitable configuration.
+See [NVIDIA's Orin Nano software encoding guide](https://docs.nvidia.com/jetson/archives/r38.4/DeveloperGuide/SD/Multimedia/SoftwareEncodeInOrinNano.html).
+
+The NVIDIA runtime, driver versions, active kernel devices and SDK libraries
+must still match. An actual H.264/H.265 smoke test on `dexson` is the
+acceptance criterion. These tests have not yet been run on the physical
+machine. We do not pass `--privileged`, mount the host root directory,
+or expose the Docker socket.
+
 ## Persistent Git provider connections
 
 The Jetson Codex container now has **Git, Git LFS, GitHub CLI (`gh`),
