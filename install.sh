@@ -193,6 +193,16 @@ hardware_health() {
   else
     say "Host CUDA driver probe unavailable: $host_cuda"
   fi
+  if command -v gst-inspect-1.0 >/dev/null 2>&1 && command -v ffmpeg >/dev/null 2>&1; then
+    say "Host media tools already present: running optional host decode test."
+    if bash ./hardware-check.sh --video; then
+      say "Host H.264 decode is operational."
+    else
+      say "Host H.264 decode test failed; container test will determine accessible hardware."
+    fi
+  else
+    say "Host media applications not installed (intentionally lean); no host packages added."
+  fi
 
   say "Checking same hardware inside DOCKER."
   docker exec "$CONTAINER" bash /opt/jetson-codex/hardware-check.sh --devices > "$dockerlist" \
@@ -208,6 +218,10 @@ hardware_health() {
   fi
   rm -f "$hostlist" "$dockerlist" "$missingfile"
   say "PASS: Every selected host character device is visible inside Docker."
+  if [[ -S /tmp/argus_socket ]] && ! docker exec "$CONTAINER" test -S /tmp/argus_socket; then
+    fail "Host Argus camera socket is missing in Docker."
+  fi
+  if [[ -S /tmp/argus_socket ]]; then say "PASS: Argus camera socket visible in Docker."; fi
 
   if docker_cuda="$(docker exec "$CONTAINER" bash /opt/jetson-codex/hardware-check.sh --cuda 2>&1)"; then
     say "Container $docker_cuda"
