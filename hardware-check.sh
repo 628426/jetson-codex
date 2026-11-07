@@ -19,7 +19,7 @@ devices() {
 }
 
 video() {
-  local tmp result=0
+  local tmp result=0 codec encoder parser media_type
   tmp="$(mktemp -d /tmp/jetson-codec-XXXXXX)"
   trap 'rm -rf "$tmp"' EXIT
   printf '[Video] NVIDIA hardware decode plugin: '
@@ -27,31 +27,38 @@ video() {
     echo 'FAIL (nvv4l2decoder missing)'; return 1
   fi
   echo OK
-  printf '[Video] CPU H.264 encode fixture: '
-  if ! command -v ffmpeg >/dev/null || ! timeout 30 ffmpeg -nostdin -hide_banner -loglevel error \
-      -f lavfi -i 'testsrc2=size=160x120:rate=10' \
-      -frames:v 12 -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
-      -y -f h264 "$tmp/sample.h264"; then
-    echo 'FAIL (ffmpeg libx264 unavailable)'; return 1
-  fi
-  echo OK
-  printf '[Video] Real NVIDIA H.264 NVDEC decode: '
-  if timeout 30 gst-launch-1.0 -q \
-      filesrc location="$tmp/sample.h264" ! h264parse ! nvv4l2decoder \
-      ! fakesink sync=false >"$tmp/decode.log" 2>&1; then
-    echo 'PASS (hardware pipeline executed)'
-  else
-    echo 'FAIL (NVIDIA decoder did not execute)'
-    tail -n 15 "$tmp/decode.log" >&2
-    result=1
-  fi
+
+  # Generate tiny H.264/H.265 fixtures using FFmpeg's *CPU encoders*, then
+  # decode them with nvv4l2decoder. This exercises actual Jetson NVDEC.
+  # No NVENC hardware exists on Orin Nano, even if an encoder plugin appears.
+  for codec in h264 h265; do
+    case "$codec" in
+      h264) encoder=libx264; parser=h264parse ;;
+      h265) encoder=libx265; parser=h265parse ;;
+    esac
+    printf '[Video] CPU %s encode fixture: ' "$codec"
+    if ! command -v ffmpeg >/dev/null || ! timeout 30 ffmpeg -nostdin -hide_banner -loglevel error \
+        -f lavfi -i 'testsrc2=size=320x240:rate=10' \
+        -frames:v 12 -threads 2 -c:v "$encoder" -preset ultrafast -pix_fmt yuv420p \
+        -y -f "$codec" "$tmp/sample.$codec" >"$tmp/encode-$codec.log" 2>&1; then
+      echo FAIL
+      tail -n 10 "$tmp/encode-$codec.log" >&2
+      result=1
+      continue
+    fi
+    echo OK
+    printf '[Video] Real NVIDIA %s NVDEC decode: ' "$codec"
+    if timeout 30 gst-launch-1.0 -q \
+        filesrc location="$tmp/sample.$codec" ! "$parser" ! nvv4l2decoder \
+        ! fakesink sync=false >"$tmp/decode-$codec.log" 2>&1; then
+      echo 'PASS (hardware decoder executed)'
+    else
+      echo 'FAIL (NVIDIA decoder did not execute)'
+      tail -n 15 "$tmp/decode-$codec.log" >&2
+      result=1
+    fi
+  done
   printf '[Video] NVENC hardware encode: N/A (Orin Nano has no NVENC engine)\n'
-  printf '[Video] Software H.265 encoder: '
-  if ffmpeg -hide_banner -encoders 2>/dev/null | grep -F 'libx265' >/dev/null; then
-    echo available
-  else
-    echo unavailable
-  fi
   return "$result"
 }
 
