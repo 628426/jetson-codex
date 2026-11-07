@@ -5,8 +5,8 @@
 set -Eeuo pipefail
 
 REPO_URL="https://github.com/628426/jetson-codex.git"
-REPO_DIR="\${JETSON_CODEX_DIR:-\${HOME:?HOME must be set}/jetson-codex}"
-IMAGE="jetson-codex:jp62-full"
+REPO_DIR="${JETSON_CODEX_DIR:-${HOME:?HOME must be set}/jetson-codex}"
+IMAGE="jetson-codex:jp72-full"
 CONTAINER="jetson-codex"
 MODE="hardware"
 BUILD=1
@@ -46,6 +46,11 @@ while (( $# )); do
 done
 
 [[ "$(uname -s)" == "Linux" ]] || fail "Linux is required."
+[[ -f /etc/os-release ]] && . /etc/os-release
+[[ "${VERSION_ID:-}" == "24.04" ]] || fail "JetPack 7 target requires Ubuntu 24.04 (found ${VERSION_ID:-unknown})."
+if [[ -f /etc/nv_tegra_release ]]; then
+  grep -q "^# R39" /etc/nv_tegra_release || fail "Expected Jetson Linux R39 (JetPack 7.2)."
+fi
 case "$(uname -m)" in
   aarch64|arm64) ;;
   *) fail "This image is for a native ARM64 Jetson. Host architecture is $(uname -m)." ;;
