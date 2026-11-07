@@ -92,7 +92,7 @@ For the easiest *one-command* setup with no rclone installed on Windows,
 run this in **Windows PowerShell** instead of opening a separate SSH session:
 
 ```powershell
-ssh -tt -L 53682:127.0.0.1:53682 dex@dexson 'RCLONE_SSH_TUNNEL=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh)"'
+ssh -tt -o ExitOnForwardFailure=yes -L 53682:127.0.0.1:53682 dex@dexson 'RCLONE_SSH_TUNNEL=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh)"'
 ```
 
 The installer runs on the Jetson as normal. During OneDrive/Google Drive
