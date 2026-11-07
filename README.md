@@ -144,6 +144,22 @@ checker verifies JetPack, Docker, Codex login, GitHub login, cloud mount and
 remote reachability. The full SDK image and FUSE mount are **not yet tested
 on the actual Orin**.
 
+## Automatic updates and full-trust verification
+
+The installer now offers **Ubuntu unattended security updates**, using
+`unattended-upgrades`, daily APT timers and weekly APT cache cleaning.
+It invokes `sudo` interactively when needed. Run
+`sudo bash ~/jetson-codex/setup-autoupdates.sh` to configure separately,
+or pass `--skip-updates` to the installer. JetPack BSP upgrades,
+Docker image rebuilds, Codex binary upgrades and cloud storage updates
+are **not** automatically performed by this feature.
+
+The health checker now parses `/root/.codex/config.toml` using Python
+`tomllib` and requires `approval_policy="never"` and
+`sandbox_mode="danger-full-access"`. It also checks the Codex executable,
+CUDA compiler and developer tools. These are static/runtime presence checks,
+not an end-to-end Codex agent command execution test.
+
 ## One-command install or update
 
 After starting the container, the installer checks `codex login status`. If already linked, it skips login. Otherwise, when run from an interactive terminal (including `curl ... | bash` over SSH), it launches `codex login --device-auth` automatically and displays the one-time code. Open **https://auth.openai.com/codex/device** on your laptop or phone to approve. If no terminal is available or login fails, the container stays running and the installer prints a retry command. GitHub CLI authentication remains a separate, optional step.
