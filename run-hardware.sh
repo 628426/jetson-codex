@@ -20,6 +20,6 @@ done
 if [[ -S /tmp/argus_socket ]]; then
   args+=(-v /tmp/argus_socket:/tmp/argus_socket)
 fi
-args+=(jetson-codex:jp62-full sleep infinity)
+args+=(jetson-codex:jp72-full sleep infinity)
 docker "${args[@]}"
 echo "Container 'jetson-codex' started. Enter with: docker exec -it jetson-codex bash -l"
