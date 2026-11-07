@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bootstrap or update 628426/jetson-codex on a Jetson Orin.
-# Single entry point: host bootstrap, install/repair, and read-only health checks.
-# User creation is opt-in; never silently migrate an existing installation.
+# Single entry point: host bootstrap, install/repair, and integrated health checks.
+# Uses the invoking account for persistent OAuth and workspace ownership.
 set -Eeuo pipefail
 
 REPO_URL="https://github.com/628426/jetson-codex.git"
