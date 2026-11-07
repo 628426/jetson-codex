@@ -123,7 +123,7 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
 fi
 if (( BUILD )); then
   say "Building full ARM64 JetPack + Codex image; this is a large build."
-  if ! docker compose build --progress=plain; then
+  if ! docker compose --progress plain build; then
     fail "Docker build failed. Check the output above and README troubleshooting; the existing container was not changed."
   fi
 else
