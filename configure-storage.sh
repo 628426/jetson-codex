@@ -35,7 +35,14 @@ WantedBy=default.target
 EOF
   systemctl --user daemon-reload
   systemctl --user enable jetson-codex-cloud.service
-  systemctl --user restart jetson-codex-cloud.service
+  if [[ "${1:-}" == "--reconfigure" ]]; then
+    say "Restarting mount after configuration change; ensure no pending uploads."
+    systemctl --user restart jetson-codex-cloud.service
+  elif ! systemctl --user is-active --quiet jetson-codex-cloud.service; then
+    systemctl --user start jetson-codex-cloud.service
+  else
+    say "Existing cloud mount is active; leaving it untouched."
+  fi
   say "Cloud mount service enabled: $RCLONE_MOUNT"
   if ! loginctl show-user "$USER" -p Linger | grep -q 'Linger=yes'; then
     say "For mounting after reboot without login, run: sudo loginctl enable-linger $USER"
