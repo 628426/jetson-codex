@@ -167,20 +167,17 @@ bash ~/jetson-codex/install.sh
 bash ~/jetson-codex/install.sh
 ```
 
-Normal reruns reuse the existing image and running container. The health
-checker verifies JetPack, Docker, Codex login, GitHub login, cloud mount and
-remote reachability. The full SDK image and FUSE mount are **not yet tested
+Normal reruns reuse the existing image and running container. The installer validates Docker, Codex, full-trust settings, NVIDIA runtime,
+GitLab/Azure tool presence and the available connection wizard. The full SDK image and FUSE mount are **not yet tested
 on the actual Orin**.
 
 ## Automatic updates and full-trust verification
 
 The installer now offers **Ubuntu unattended security updates**, using
 `unattended-upgrades`, daily APT timers and weekly APT cache cleaning.
-It invokes `sudo` interactively when needed. Run
-`bash ~/jetson-codex/install.sh` to configure separately,
-or pass `--skip-updates` to the installer. JetPack BSP upgrades,
-Docker image rebuilds, Codex binary upgrades and cloud storage updates
-are **not** automatically performed by this feature.
+It invokes `sudo` only for host configuration. The same no-argument installer
+also rebuilds the image when tracked build inputs change. JetPack BSP
+upgrades and untracked upstream tool releases remain manual.
 
 The health checker now parses `/root/.codex/config.toml` using Python
 `tomllib` and requires `approval_policy="never"` and
@@ -287,22 +284,15 @@ volumes and the host-mounted workspace are retained.
 these mappings; camera functionality still depends on host drivers and
 libraries. It does **not** use `--privileged`.
 
-Alternatives:
-
-```bash
-# Compose-managed container, NVIDIA GPU but no additional host devices
-curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --gpu-only
-
-# Update the repo and restart using an image already built successfully
-curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --no-build
-```
+The installer takes **no arguments**. Every rerun reconciles dependencies,
+rebuilds changed image inputs and checks the existing container.
 
 The installer can recreate an existing `jetson-codex` container when
 deploying an update, which interrupts any active processes inside it. It will
 **not** delete authentication volumes. It refuses to overwrite a directory
 that is not this checkout, a checkout with tracked local modifications, or
-an unrelated container with the same name. It does not install Docker or
-change the host's networking configuration.
+an unrelated container with the same name. It can install and register the NVIDIA Container Toolkit and restart Docker
+when the runtime is absent; Docker Engine itself must be present.
 
 After the script completes:
 
@@ -336,19 +326,19 @@ the build and `/opt/jetson-codex/verify.sh` succeed on a real Jetson.
 
 ## Install (on your Orin)
 
-1. Ensure Docker, the Compose plugin, and the NVIDIA container runtime are installed: `docker compose version` and `docker info | grep -A3 Runtimes` (look for `nvidia`).
-2. Clone this repository onto your Jetson Orin and build:
+For manual troubleshooting only, ensure Docker and Compose are installed, then
+clone and build from the appropriate versioned Dockerfile:
 
 ```bash
 git clone https://github.com/628426/jetson-codex.git
 cd jetson-codex
 mkdir -p workspace
-docker compose build --progress=plain
+docker compose --progress plain build
 docker compose up -d --no-build
 docker exec -it jetson-codex bash -l
 ```
 
-3. In ChatGPT settings, ensure **device code login is enabled** under your security settings (or allowed by your workspace administrator). Then, inside the container, authenticate using **device-code login** (recommended for headless Jetsons):
+For headless Codex authentication, ensure **device code login is enabled** under your security settings (or allowed by your workspace administrator). Then, inside the container, authenticate using **device-code login** (recommended for headless Jetsons):
 
 ```bash
 codex login --device-auth
