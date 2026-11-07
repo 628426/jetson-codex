@@ -54,6 +54,7 @@ while (( $# )); do
   shift
 done
 
+[[ $EUID -ne 0 ]] || fail "Run as your normal user, not sudo. The installer uses sudo only for host package/runtime setup."
 [[ "$(uname -s)" == "Linux" ]] || fail "Linux is required."
 [[ -f /etc/os-release ]] || fail "Cannot identify host OS."
 . /etc/os-release
