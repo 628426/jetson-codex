@@ -218,6 +218,10 @@ RUN chmod 0755 /opt/jetson-codex/*.sh \
     && ln -sf /opt/jetson-codex/codex-connect.sh /usr/local/bin/codex-connect \
     && mkdir -p /workspace /root/.codex \
     && printf '\n# Jetson Codex development tools\nexport PATH="/root/.phpenv/shims:/root/.phpenv/bin:/root/.local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.swiftly/bin:/usr/local/cuda/bin:$PATH"\n' >> /root/.bashrc
+# Build fingerprint is injected by install.sh and added only at the end so
+# documentation changes do not invalidate expensive language toolchain layers.
+ARG JETSON_CODEX_BUILD_HASH=untracked
+LABEL org.jetson-codex.build-hash="${JETSON_CODEX_BUILD_HASH}"
 ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=all
 WORKDIR /workspace
 ENTRYPOINT ["/opt/jetson-codex/entrypoint.sh"]
