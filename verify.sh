@@ -13,6 +13,10 @@ check() {
 }
 check 'Codex' codex --version
 check 'GitHub CLI' gh --version
+check 'Git provider setup' codex-connect --status
+check 'GitLab CLI' glab --version
+check 'Azure CLI' az --version
+check 'Azure DevOps CLI' az devops --help
 check 'CUDA compiler' nvcc --version
 check 'DeepStream' bash -lc 'test -d /opt/nvidia/deepstream/deepstream-9.1 && echo DeepStream-9.1'
 check 'TensorRT' bash -lc 'ldconfig -p | grep -m1 libnvinfer.so'
