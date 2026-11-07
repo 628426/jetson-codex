@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$(realpath "$0")")"
-mkdir -p workspace
+mkdir -p workspace workspace/source "$HOME/jetson-codex-cloud"
 if docker container inspect jetson-codex >/dev/null 2>&1; then
   echo "Container 'jetson-codex' already exists. If started with Compose, use 'docker compose down' first; if stopped, use 'docker start jetson-codex'." >&2
   exit 1
@@ -9,6 +9,8 @@ fi
 args=(run -d --name jetson-codex --restart unless-stopped --runtime=nvidia --network=host --init
       --shm-size=1g -v "${PWD}/workspace:/workspace" -v jetson-codex-auth:/root/.codex
       -v jetson-github-auth:/root/.config/gh -v jetson-git-config:/root/.config/git
+      -v "$HOME/jetson-codex-cloud:/workspace/projects:rslave" \
+      -v "${PWD}/workspace/source:/workspace/source" \
       -w /workspace -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all
       -e GIT_CONFIG_GLOBAL=/root/.config/git/config)
 # Only grant actual device nodes. No --privileged, --pid=host or Docker socket.
