@@ -8,7 +8,7 @@ This is an independently authored ARM64 port, **not OpenAI's official Codex Univ
 
 ## NVIDIA SDK: DeepStream, TensorRT, cuDNN and VPI
 
-The Dockerfile now starts from NVIDIA's **official Jetson DeepStream 9.1 Triton image**:
+The JetPack 7.2.0 Dockerfile starts from NVIDIA's **official Jetson DeepStream 9.1 Triton image**:
 
 ```text
 nvcr.io/nvidia/deepstream:9.1-triton-multiarch
@@ -37,6 +37,32 @@ References:
 - [NVIDIA DeepStream 9.1 Jetson containers](https://docs.nvidia.com/metropolis/deepstream/9.1/text/DS_docker_containers.html)
 - [NVIDIA DeepStream 9.1 source and Jetson build guidance](https://github.com/NVIDIA/DeepStream)
 - [JetPack 7.2 component versions](https://developer.nvidia.com/embedded/jetpack/downloads/archive-7.2)
+
+## Version-specific Dockerfile selection
+
+The installer now reads `/etc/nv_tegra_release` and selects a Dockerfile
+**before building**. Currently supported:
+
+| Detected L4T | JetPack | Dockerfile | Image tag |
+|---|---|---|---|
+| R39.2.0 | 7.2.0 | [Dockerfile.jetpack-7.2.0](Dockerfile.jetpack-7.2.0) | `jetson-codex:jp72-full` |
+
+This matches the **Seeed J401 / Orin Nano 8GB** firmware reported by the
+original device. The script refuses unknown versions rather than accidentally
+building a container for the wrong JetPack. The original `Dockerfile` remains
+for backwards compatibility, but the installer explicitly selects the versioned
+file. Compose accepts `JETSON_CODEX_DOCKERFILE` and
+`JETSON_CODEX_IMAGE` overrides, both set automatically by `install.sh`.
+
+Direct manual build (without installer):
+
+```bash
+docker build -f Dockerfile.jetpack-7.2.0 -t jetson-codex:jp72-full .
+```
+
+**Note:** This selects the correct *intended* build configuration. The full
+DeepStream/VPI/Codex image has not yet been successfully built and verified on
+this Orin; firmware detection alone cannot guarantee its dependencies work.
 
 ## One-command install or update
 
