@@ -80,8 +80,8 @@ RUN mise --version
 # Persistent Git hosting clients for GitLab and Azure DevOps.
 # glab is installed from GitLab releases using the mise backend.
 ARG GLAB_VERSION=1.128.0
-RUN mise install "glab${GLAB_VERSION}" \
-    && mise use --global "glab${GLAB_VERSION}" \
+RUN mise install "glab@${GLAB_VERSION}" \
+    && mise use --global "glab@${GLAB_VERSION}" \
     && glab --version
 
 # Azure DevOps CLI for Azure DevOps Services (not on-prem DevOps Server).
