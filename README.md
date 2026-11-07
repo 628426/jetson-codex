@@ -81,6 +81,22 @@ the Jetson host filesystem, but the container uses host networking and
 passes through detected hardware devices. Only run trusted repositories
 and prompts with this setting.
 
+## Headless OAuth on SSH
+
+Cloud linking now uses the normal `rclone config` wizard under a terminal
+automation wrapper. On a headless Jetson, **the installer automatically answers
+N** to `Use auto config?` (or the newer equivalent). This avoids incorrectly
+opening an OAuth callback on the Jetson's `127.0.0.1`.
+
+Run the `rclone authorize ...` command shown by the Jetson on your **Windows
+PC**, complete Microsoft/Google sign-in in your browser, and paste the
+resulting token back into the SSH terminal. Rclone is needed on the PC for
+that one-time authorisation. Credentials are then persisted on the Jetson.
+The installer auto-installs the small `expect` CLI package for prompt handling.
+
+If setup was interrupted with Ctrl-C, rerun the **same installer command**.
+An existing linked remote can be reused without another OAuth flow.
+
 ## Cloud-backed projects and repeatable health checks
 
 The installer can configure **OneDrive or Google Drive** as the persistent
