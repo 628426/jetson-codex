@@ -14,6 +14,7 @@ BUILD=0
 FORCE_BUILD=0
 HEALTH_ONLY=0
 NO_BUILD=0
+SKIP_UPDATES=0
 
 say() { printf '[jetson-codex] %s\n' "$*"; }
 fail() { printf '[jetson-codex] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -28,6 +29,7 @@ and start a named persistent container.
                 device nodes and the CSI Argus socket if present, plus GPU.
   --gpu-only    Use Docker Compose, with NVIDIA GPU but no extra device nodes.
   --no-build    Require an existing image; do not build.\n  --rebuild     Force an image rebuild even when already present.\n  --check       Run read-only health checks without changing anything.
+  --skip-updates  Do not configure Ubuntu unattended security updates.
   -h, --help    Show this help.
 
 Optional: JETSON_CODEX_DIR overrides ~/jetson-codex.
@@ -45,6 +47,7 @@ while (( $# )); do
     --no-build) NO_BUILD=1 ;;
     --rebuild) FORCE_BUILD=1 ;;
     --check) HEALTH_ONLY=1 ;;
+    --skip-updates) SKIP_UPDATES=1 ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown argument: $1 (use --help)" ;;
   esac
@@ -104,6 +107,16 @@ else
 fi
 
 cd "$REPO_DIR"
+if (( ! SKIP_UPDATES )); then
+  if bash ./setup-autoupdates.sh --check; then
+    say "Ubuntu unattended security updates already configured."
+  elif [[ -r /dev/tty && -w /dev/tty ]]; then
+    say "Configuring automatic Ubuntu security updates (sudo required)."
+    sudo bash ./setup-autoupdates.sh </dev/tty || say "Automatic updates not configured; retry with sudo bash ~/jetson-codex/setup-autoupdates.sh"
+  else
+    say "No interactive terminal for sudo; configure later: sudo bash ~/jetson-codex/setup-autoupdates.sh"
+  fi
+fi
 [[ -f "$DOCKERFILE" ]] || fail "Selected Dockerfile missing: $DOCKERFILE"
 mkdir -p workspace workspace/source "$HOME/jetson-codex-cloud"
 if [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
