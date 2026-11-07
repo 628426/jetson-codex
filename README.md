@@ -64,6 +64,23 @@ docker build -f Dockerfile.jetpack-7.2.0 -t jetson-codex:jp72-full .
 DeepStream/VPI/Codex image has not yet been successfully built and verified on
 this Orin; firmware detection alone cannot guarantee its dependencies work.
 
+## Codex full trust
+
+The installer automatically persists these Codex settings in the named
+`jetson-codex-auth` volume:
+
+```toml
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+```
+
+Codex therefore **does not ask for command approvals** and can read/write
+the container filesystem and mounted workspace. These settings survive
+container recreation. They do **not** give Codex unrestricted access to
+the Jetson host filesystem, but the container uses host networking and
+passes through detected hardware devices. Only run trusted repositories
+and prompts with this setting.
+
 ## One-command install or update
 
 After starting the container, the installer checks `codex login status`. If already linked, it skips login. Otherwise, when run from an interactive terminal (including `curl ... | bash` over SSH), it launches `codex login --device-auth` automatically and displays the one-time code. Open **https://auth.openai.com/codex/device** on your laptop or phone to approve. If no terminal is available or login fails, the container stays running and the installer prints a retry command. GitHub CLI authentication remains a separate, optional step.
