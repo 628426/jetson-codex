@@ -100,23 +100,51 @@ if ((${#remotes[@]} > 0)); then
 fi
 
 if [[ -z "$remote" ]]; then
-  printf '\nSelect cloud provider:\n  1) Microsoft OneDrive\n  2) Google Drive\nProvider [1/2]: ' >/dev/tty
-  IFS= read -r choice </dev/tty
-  case "$choice" in
-    1|onedrive|OneDrive) backend="onedrive"; remote="jetson-onedrive" ;;
-    2|drive|gdrive|Google) backend="drive"; remote="jetson-gdrive" ;;
-    *) fail "Choose 1 for OneDrive or 2 for Google Drive." ;;
-  esac
-  if printf '%s\n' "${remotes[@]}" | grep -Fxq "$remote"; then
-    fail "Remote '$remote' exists. Re-run and select it from the existing remotes list."
+  if ! command -v expect >/dev/null 2>&1; then
+    say "Installing terminal automation for guaranteed headless OAuth."
+    sudo apt-get update
+    sudo apt-get install -y --no-install-recommends expect
   fi
+  say "Starting rclone's normal provider setup."
+  say "When rclone asks 'Use auto config?', the installer will answer N automatically."
+  # Keep the rclone interactive wizard (including OneDrive drive selection),
+  # but force the ONLY browser-location prompt to N. 'rclone config create'
+  # is NOT sufficient on older rclone releases because it auto-confirms an
+  # empty verification code and can still launch 127.0.0.1 OAuth.
+  expect -c '
+    set timeout -1
+    spawn -noecho rclone config
+    interact -o -re {Use auto config\?|Use web browser to automatically authenticate rclone with remote\?} {
+      send -- "n\r"
+    }
+    set result [wait]
+    exit [lindex $result 3]
+  ' </dev/tty >/dev/tty 2>&1 \
+    || fail "Rclone cloud setup did not finish. Re-run installer to retry."
 
-  say "Creating $remote using HEADLESS authentication (config_is_local=false)."
-  say "The Jetson will print an rclone authorize command for your Windows PC."
-  # Avoid the normal interactive wizard's default auto-configuration, which
-  # binds OAuth to the Jetson's localhost rather than your Windows machine.
-  rclone config create "$remote" "$backend" config_is_local=false </dev/tty >/dev/tty 2>&1 \
-    || fail "Cloud authorisation was not completed. Re-run the installer to retry."
+  mapfile -t connected_remotes < <(rclone listremotes | sed 's/:$//')
+  new_remotes=()
+  for candidate in "${connected_remotes[@]}"; do
+    found=0
+    for previous in "${remotes[@]}"; do
+      if [[ "$candidate" == "$previous" ]]; then found=1; break; fi
+    done
+    (( found )) || new_remotes+=("$candidate")
+  done
+  if ((${#new_remotes[@]} == 1)); then
+    remote="${new_remotes[0]}"
+    say "New cloud remote detected: $remote"
+  else
+    printf 'Available rclone remotes:\n' >/dev/tty
+    printf '  %s\n' "${connected_remotes[@]}" >/dev/tty
+    printf 'Remote name to mount: ' >/dev/tty
+    IFS= read -r remote </dev/tty
+    valid=0
+    for candidate in "${connected_remotes[@]}"; do
+      [[ "$candidate" == "$remote" ]] && valid=1
+    done
+    (( valid )) || fail "No such rclone remote: $remote"
+  fi
 fi
 
 say "Checking that $remote is accessible."
