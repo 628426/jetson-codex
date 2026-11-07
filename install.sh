@@ -85,7 +85,11 @@ done
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required (docker compose)."
 docker info >/dev/null 2>&1 || fail "Cannot connect to Docker. Check daemon and Docker group membership."
 if ! docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
-  fail "NVIDIA Docker runtime is not registered. Install/configure nvidia-container-toolkit on the host first."
+  say "NVIDIA Docker runtime missing. Installing/configuring automatically."
+  # Run the host setup from the trusted repository checkout after it is fetched.
+  NEED_NVIDIA_RUNTIME=1
+else
+  NEED_NVIDIA_RUNTIME=0
 fi
 
 if [[ -e "$REPO_DIR" ]]; then
@@ -107,6 +111,15 @@ else
 fi
 
 cd "$REPO_DIR"
+if (( NEED_NVIDIA_RUNTIME )); then
+  [[ -f ./setup-nvidia-runtime.sh ]] || fail "Host NVIDIA runtime setup script missing."
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    sudo bash ./setup-nvidia-runtime.sh </dev/tty || fail "NVIDIA runtime setup failed."
+  else
+    fail "NVIDIA runtime setup requires sudo. Run: sudo bash $REPO_DIR/setup-nvidia-runtime.sh"
+  fi
+  docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"' || fail "NVIDIA runtime still missing."
+fi
 if (( ! SKIP_UPDATES )); then
   if bash ./setup-autoupdates.sh --check; then
     say "Ubuntu unattended security updates already configured."
