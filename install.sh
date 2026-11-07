@@ -134,20 +134,41 @@ if ! docker ps --filter "name=^/$CONTAINER$" --format '{{.Names}}' | grep -Fxq "
   fail "$CONTAINER is not running; inspect 'docker logs $CONTAINER'."
 fi
 
+# Interactive authentication requires a real TTY. curl | bash does not always
+# provide stdin to the script, so attach docker exec to /dev/tty explicitly.
+say "Checking existing Codex login"
+if docker exec "$CONTAINER" codex login status >/dev/null 2>&1; then
+  say "Codex is already authenticated; skipping device login."
+else
+  say "Codex is not authenticated."
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    say "Starting device login. Open https://auth.openai.com/codex/device and enter the code displayed below."
+    if ! docker exec -it "$CONTAINER" codex login --device-auth </dev/tty >/dev/tty 2>&1; then
+      say "Codex login was not completed; retry with: docker exec -it jetson-codex codex login --device-auth"
+    fi
+  else
+    say "No interactive terminal available. Run: docker exec -it jetson-codex codex login --device-auth"
+  fi
+fi
+
 cat <<'DONE'
 
-[jetson-codex] Container is running and will restart after a Jetson reboot.
+[jetson-codex] Persistent container is running.
 
 Enter it:
   docker exec -it jetson-codex bash -l
 
-First-time authentication (inside container):
-  codex login --device-auth
-    Open https://auth.openai.com/codex/device and enter the code shown.
-  gh auth login --hostname github.com --git-protocol https --web
-    Open https://github.com/login/device and enter the code shown.
-  gh auth setup-git
+Codex device login (if still required):
+  docker exec -it jetson-codex codex login --device-auth
+  https://auth.openai.com/codex/device
 
-Then run: codex
-Saved authentication survives image rebuilds and container recreation.
+GitHub CLI login (separate, once):
+  docker exec -it jetson-codex gh auth login --hostname github.com --git-protocol https --web
+  https://github.com/login/device
+  docker exec jetson-codex gh auth setup-git
+
+Run Codex:
+  docker exec -it jetson-codex codex
+
+Saved credentials survive container recreation and image rebuilds.
 DONE
