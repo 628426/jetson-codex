@@ -101,7 +101,7 @@ healthcheck() {
   check() { if "$@" >/dev/null 2>&1; then say "OK: $*"; else say "FAIL: $*"; failures=$((failures+1)); fi; }
   check docker info
   check docker compose version
-  check docker info --format '{{json .Runtimes}}'
+  if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'; then say 'OK: NVIDIA runtime registered'; else say 'FAIL: NVIDIA runtime missing'; failures=$((failures+1)); fi
   check docker container inspect jetson-codex
   check docker exec jetson-codex codex --version
   check docker exec jetson-codex codex login status
@@ -126,7 +126,12 @@ for bin in git docker; do
   command -v "$bin" >/dev/null 2>&1 || fail "Missing prerequisite: $bin"
 done
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required (docker compose)."
-docker info >/dev/null 2>&1 || fail "Cannot connect to Docker. Check daemon and Docker group membership."
+if ! docker info >/dev/null 2>&1; then
+  if ! id -nG "$USER" | tr ' ' '\n' | grep -Fxq docker; then
+    fail "User $USER lacks Docker access. Run: sudo usermod -aG docker $USER ; then reconnect SSH. Or run installer with --service-user."
+  fi
+  fail "Docker unavailable in this session. Reconnect SSH after group changes; check systemctl status docker."
+fi
 if ! docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
   say "NVIDIA Docker runtime missing. Installing/configuring automatically."
   # Run the host setup from the trusted repository checkout after it is fetched.
