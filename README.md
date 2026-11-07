@@ -2,13 +2,41 @@
 
 **Goal:** One native ARM64 developer container for Jetson Orin, with NVIDIA JetPack userland, GPU support, Codex CLI, and the complete *language/toolchain inventory* from OpenAI's `codex-universal` Dockerfile as reviewed 6 November 2026.
 
-**Host target:** JetPack 7.2 (L4T 39.2), Ubuntu 24.04, arm64. **Base:** NVIDIA's documented `nvcr.io/nvidia/cuda:13.0.0-devel-ubuntu24.04`. This provides CUDA development tools, not the entire JetPack SDK. TensorRT, cuDNN, VPI, DeepStream and multimedia SDKs are not included by assumption.
+**Host target:** JetPack 7.2 (L4T 39.2), Ubuntu 24.04, arm64. **Base:** NVIDIA's official `nvcr.io/nvidia/deepstream:9.1-triton-multiarch` for JetPack 7.2. CUDA, TensorRT, cuDNN and DeepStream are bundled. VPI is requested as a separate package and must pass build verification.
 
 This is an independently authored ARM64 port, **not OpenAI's official Codex Universal image**. Tool *presence* and selectable language versions are the target; exact package versions and behaviour need validation. It has **not been built or tested on your Orin**.
 
-## JetPack 7.2 migration
+## NVIDIA SDK: DeepStream, TensorRT, cuDNN and VPI
 
-This repository now targets **Ubuntu 24.04 / Jetson Linux R39**, not JetPack 6. The installer checks Ubuntu 24.04 and L4T R39 where detectable. After flashing, install Docker, Compose v2 and NVIDIA Container Toolkit on the host. The full image is not yet build-tested on this Orin. The official CUDA development base does not guarantee the full JetPack SDK; TensorRT and DeepStream need separate compatible packages. See [NVIDIA's Jetson CUDA container guide](https://docs.nvidia.com/jetson/orin-nano-devkit/user-guide/setup_cuda.html).
+The Dockerfile now starts from NVIDIA's **official Jetson DeepStream 9.1 Triton image**:
+
+```text
+nvcr.io/nvidia/deepstream:9.1-triton-multiarch
+```
+
+This is the version aligned with **JetPack 7.2 GA / L4T R39.2**.
+It provides the DeepStream runtime, CUDA 13.2, TensorRT, cuDNN,
+GStreamer NVIDIA plugins and Triton backends. The Dockerfile additionally
+requests NVIDIA's `libnvvpi4` and `vpi4-dev` packages, and checks that
+SDK libraries exist. **The VPI packages must be available from configured
+APT repositories in the base image.** If they aren't, the build fails
+explicitly rather than silently producing an incomplete SDK.
+
+NVIDIA describes its Jetson DeepStream containers as **deployment-only**.
+Adding C/C++ compilers and general toolchains does *not* automatically make
+the entire DeepStream SDK development environment supported. Building
+custom DeepStream plugins may still require NVIDIA's Jetson SDK source,
+headers and build procedure. That is a separate acceptance test.
+
+**This configuration is source-reviewed but has not been built on your
+Orin.** Do not claim full hardware support until `docker compose build`,
+`/opt/jetson-codex/verify.sh`, and a real DeepStream sample pass.
+
+References:
+
+- [NVIDIA DeepStream 9.1 Jetson containers](https://docs.nvidia.com/metropolis/deepstream/9.1/text/DS_docker_containers.html)
+- [NVIDIA DeepStream 9.1 source and Jetson build guidance](https://github.com/NVIDIA/DeepStream)
+- [JetPack 7.2 component versions](https://developer.nvidia.com/embedded/jetpack/downloads/archive-7.2)
 
 ## One-command install or update
 
@@ -330,16 +358,16 @@ Specify them in the Compose `environment:` section (or as `docker run -e KEY=val
 | Swift | 5.10, 6.1, 6.2, where ARM64 installer works. `INSTALL_SWIFT=1` |
 | Erlang/Elixir | Erlang 27.1.2; Elixir 1.18.3-otp-27 |
 | Others | Bun 1.2.14, Bazelisk 1.26.0, GCC, Clang, Clang-Tidy/Format, CMake, Ninja, NASM, GDB, SWIG, Protobuf, SQLite, git, git-lfs, jq, ripgrep (see note), rsync, Git tooling, SSH, GStreamer, V4L2, GPIO, I²C |
-| NVIDIA | CUDA 13 development base, NVIDIA runtime GPU access and device utilities. cuDNN, TensorRT, VPI, DeepStream and Jetson multimedia SDK require separate compatible installation |
+| NVIDIA | DeepStream 9.1, CUDA 13.2, cuDNN, TensorRT, NVIDIA GStreamer plugins and Triton in official base; VPI 4 explicitly installed and verified if NVIDIA APT packages resolve |
 | Codex | OpenAI Codex standalone ARM64-musl release binary, independently of Node |
 
-**Gap vs exact OpenAI environment:** both now use Ubuntu **24.04**, but this image uses NVIDIA's CUDA development base rather than the upstream general-purpose Ubuntu base. `mise` replaces upstream `pyenv`/`nvm`, so those exact managers are absent. The upstream ARM64 reference excludes Swift, but this image attempts Swift via its supported ARM64 binaries. The upstream docs also conflict with its Dockerfile for Node24/PHP8.5, so this file uses the Dockerfile versions. `ripgrep` is installed by apt as `rg` (Ubuntu version differs). Java 11 is not part of OpenAI's ARM64 JDK set. Build failures on upstream download/toolchain combinations must be fixed, not silently ignored.
+**Gap vs exact OpenAI environment:** both use Ubuntu **24.04**, but this image uses NVIDIA's DeepStream 9.1 Triton base rather than the upstream general-purpose Ubuntu base. `mise` replaces upstream `pyenv`/`nvm`, so those exact managers are absent. The upstream ARM64 reference excludes Swift, but this image attempts Swift via its supported ARM64 binaries. The upstream docs also conflict with its Dockerfile for Node24/PHP8.5, so this file uses the Dockerfile versions. `ripgrep` is installed by apt as `rg` (Ubuntu version differs). Java 11 is not part of OpenAI's ARM64 JDK set. Build failures on upstream download/toolchain combinations must be fixed, not silently ignored.
 
 ## Hardware checks
 
 `/opt/jetson-codex/verify.sh` checks the installed CLI/toolchains and calls the real CUDA driver to count GPU devices. `nvcc --version` alone proves only that the compiler is present, **not** that CUDA works. `nvidia-smi` is not a reliable Jetson health test.
 
-JetPack 7.2 supports DeepStream 9.x, but it is **not installed** by this Dockerfile. NVIDIA lists CUDA 13.2.1 for JetPack 7.2; the documented CUDA development base here is 13.0.0. Verify compatibility on-device.
+DeepStream 9.1 is now included via the official Jetson image. JetPack 7.2 GA is the intended host. This does not guarantee DeepStream SDK development support inside the container; validate on-device.
 
 ## Security
 
