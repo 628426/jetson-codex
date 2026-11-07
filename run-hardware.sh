@@ -16,11 +16,15 @@ args=(run -d --name jetson-codex --restart unless-stopped --runtime=nvidia --net
       -v "${PWD}/workspace/source:/workspace/source" \
       -w /workspace -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all
       -e GIT_CONFIG_GLOBAL=/root/.config/git/config)
-# Only grant actual device nodes. No --privileged, --pid=host or Docker socket.
-shopt -s nullglob
-for dev in /dev/video[0-9]* /dev/i2c-[0-9]* /dev/gpiochip[0-9]* /dev/ttyUSB[0-9]* /dev/ttyACM[0-9]*; do
+# Grant only actual character devices reported by the common capability probe.
+# This explicitly includes Jetson NVDEC/VIC/NVJPG nodes as well as camera
+# and embedded I/O devices; NVIDIA runtime also contributes driver libraries.
+# No --privileged, --pid=host, host filesystem, or Docker socket.
+mapfile -t hardware_nodes < <(bash ./hardware-check.sh --devices)
+for dev in "${hardware_nodes[@]}"; do
   if [[ -c "$dev" ]]; then args+=(--device "$dev:$dev"); fi
 done
+echo "[jetson-codex] Explicitly mapping ${#hardware_nodes[@]} available host hardware device nodes."
 # The Jetson Argus camera server uses this Unix socket if CSI cameras are attached.
 if [[ -S /tmp/argus_socket ]]; then
   args+=(-v /tmp/argus_socket:/tmp/argus_socket)
