@@ -1,0 +1,21 @@
+name: Validate install and connection scripts
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  bash-syntax:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Bash syntax of all installers and helpers
+        run: |
+          set -euo pipefail
+          for file in ./*.sh; do
+            bash -n "$file"
+          done
+      - name: Check Python configuration helper
+        run: python3 -m py_compile configure-full-trust.py
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
