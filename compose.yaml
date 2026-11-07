@@ -1,14 +1,10 @@
 services:
   jetson-codex:
     container_name: jetson-codex
-    image: jetson-codex:jp62-full
+    image: jetson-codex:jp72-full
     build:
       context: .
       dockerfile: Dockerfile
-      # JetPack 6.x kernel omits iptables raw; avoid Docker's bridge during build.
-      network: host
-      entitlements:
-        - network.host
       platforms: [linux/arm64]
       args:
         INSTALL_PHP: "1"
@@ -18,7 +14,7 @@ services:
     restart: unless-stopped
     # Keep the container alive; enter on demand using docker exec.
     command: ["sleep", "infinity"]
-    # Avoid Docker bridge at runtime too (no ports are published by this service).
+    # Host networking retained for local development tools and camera services.
     network_mode: host
     stdin_open: true
     tty: true
