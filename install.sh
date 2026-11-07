@@ -204,6 +204,23 @@ else
   fi
 fi
 
+# Link GitHub once if the user has a terminal; credentials persist in named volume.
+if docker exec "$CONTAINER" gh auth status >/dev/null 2>&1; then
+  say "GitHub already linked; skipping OAuth."
+elif [[ -r /dev/tty && -w /dev/tty ]]; then
+  printf '\n========================================================\n' >/dev/tty
+  printf ' GITHUB LINKING\n Open: https://github.com/login/device\n' >/dev/tty
+  printf ' Enter the one-time code shown by GitHub CLI.\n' >/dev/tty
+  printf '========================================================\n' >/dev/tty
+  if docker exec -it "$CONTAINER" gh auth login --hostname github.com --git-protocol https --web </dev/tty >/dev/tty 2>&1; then
+    docker exec "$CONTAINER" gh auth setup-git || say "GitHub authenticated; git credential helper setup needs attention."
+  else
+    say "GitHub linking skipped or failed; retry: docker exec -it jetson-codex gh auth login --hostname github.com --git-protocol https --web"
+  fi
+else
+  say "GitHub not linked; no interactive terminal available."
+fi
+
 say "Running health checks"
 bash ./healthcheck.sh || say "Health checks reported issues; see output above."
 
