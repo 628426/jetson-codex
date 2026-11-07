@@ -68,6 +68,11 @@ case "$(uname -m)" in
   *) fail "This image is for a native ARM64 Jetson. Host architecture is $(uname -m)." ;;
 esac
 
+if (( HEALTH_ONLY )); then
+  [[ -f "$REPO_DIR/healthcheck.sh" ]] || fail "Health checker missing; run installer normally once."
+  exec bash "$REPO_DIR/healthcheck.sh"
+fi
+
 for bin in git docker; do
   command -v "$bin" >/dev/null 2>&1 || fail "Missing prerequisite: $bin"
 done
@@ -96,7 +101,6 @@ else
 fi
 
 cd "$REPO_DIR"
-if (( HEALTH_ONLY )); then exec bash ./healthcheck.sh; fi
 [[ -f "$DOCKERFILE" ]] || fail "Selected Dockerfile missing: $DOCKERFILE"
 mkdir -p workspace workspace/source "$HOME/jetson-codex-cloud"
 if [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
