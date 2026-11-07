@@ -13,6 +13,7 @@ MODE="hardware"
 BUILD=0
 FORCE_BUILD=0
 HEALTH_ONLY=0
+NO_BUILD=0
 
 say() { printf '[jetson-codex] %s\n' "$*"; }
 fail() { printf '[jetson-codex] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -41,7 +42,7 @@ while (( $# )); do
   case "$1" in
     --hardware) MODE="hardware" ;;
     --gpu-only) MODE="compose" ;;
-    --no-build) BUILD=0 ;;\n    --rebuild) FORCE_BUILD=1 ;;\n    --check) HEALTH_ONLY=1 ;;
+    --no-build) NO_BUILD=1 ;;\n    --rebuild) FORCE_BUILD=1 ;;\n    --check) HEALTH_ONLY=1 ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown argument: $1 (use --help)" ;;
   esac
@@ -116,8 +117,12 @@ fi
 if [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
   bash ./configure-storage.sh --mount || say "Cloud mount unavailable; health check will report this."
 fi
+if (( FORCE_BUILD && NO_BUILD )); then fail "Cannot combine --rebuild and --no-build"; fi
 if (( FORCE_BUILD )); then BUILD=1; fi
-if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then BUILD=1; fi
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  (( NO_BUILD )) && fail "--no-build requested but image $IMAGE does not exist."
+  BUILD=1
+fi
 if (( BUILD )); then
   say "Building full ARM64 JetPack + Codex image; this is a large build."
   if ! docker compose build --progress=plain; then
@@ -132,7 +137,7 @@ if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
   current_image="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")"
   [[ "$current_image" == "$IMAGE" ]] || fail "A container named '$CONTAINER' already exists using '$current_image'. Not replacing an unrelated container."
   if [[ "$MODE" == "hardware" ]]; then
-    if (( BUILD )) || ! docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
+    if (( BUILD )) || ! docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER" || ! docker exec "$CONTAINER" test -d /workspace/projects; then
       say "Refreshing hardware container (persistent volumes retained)."
       docker rm -f "$CONTAINER" >/dev/null
     else
