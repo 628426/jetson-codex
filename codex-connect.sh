@@ -55,7 +55,7 @@ ensure_key() {
   chmod 644 "$key.pub"
   local conf="$HOST_DIR/$safe.conf"
   # One managed config file per provider/host. No global SSH overrides.
-  printf 'Host %s\n  HostName %s\n  User git\n  IdentityFile %s\n  IdentitiesOnly yes\n  BatchMode yes\n' \
+  printf 'Host %s\n  HostName %s\n  User git\n  IdentityFile %s\n  IdentitiesOnly yes\n  PreferredAuthentications publickey\n' \
     "$host" "$host" "$key" > "$conf"
   chmod 600 "$conf"
   KEY_FILE="$key"
@@ -136,6 +136,30 @@ link_bitbucket() {
   mark_linked
   say "Bitbucket is configured for Git over SSH. Repository permissions still apply."
 }
+# For private Bitbucket Data Center/Server deployments, use the SSH clone
+# hostname and port supplied by that installation (often 7999).
+link_bitbucket_private() {
+  local host port
+  ask "Bitbucket Data Center hostname (DNS name, not URL): "
+  host="$REPLY"
+  valid_host "$host" || { warn "Invalid hostname."; return 1; }
+  ask "SSH port [7999]: "
+  port="${REPLY:-7999}"
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( 10#$port > 0 && 10#$port <= 65535 )) \
+    || { warn "Invalid SSH port."; return 1; }
+  ensure_key "bitbucket-$host" "$host" ed25519
+  printf '  Port %s\n' "$port" >> "$HOST_DIR/$KEY_ID.conf"
+  if [[ -f "$SSH_DIR/.jetson-linked-$KEY_ID" ]]; then
+    say "This Bitbucket server's SSH key was previously registered."
+    return
+  fi
+  say "Open https://$host and add the public SSH key under your user account's SSH keys."
+  print_key
+  ask "Press Enter once the public key has been saved, or type 'skip': "
+  [[ "$REPLY" == "skip" ]] && return
+  mark_linked
+  say "Use the SSH clone URL provided by Bitbucket Data Center. Git push/pull is ready."
+}
 link_azure() {
   # Azure DevOps Services currently supports RSA, not Ed25519 SSH user keys.
   ensure_key azure-devops ssh.dev.azure.com rsa
@@ -154,7 +178,7 @@ link_azure() {
       ask "Link Azure CLI for PRs, boards and pipelines using Microsoft device login? [y/N]: "
       if [[ "$REPLY" =~ ^[Yy]$ ]]; then
         say "Open https://microsoft.com/devicelogin and enter the code shown."
-        az login --use-device-code || warn "Azure CLI login not completed."
+        az login --use-device-code --allow-no-subscriptions || warn "Azure CLI login not completed."
       fi
     else
       say "Azure CLI already authenticated."
@@ -196,8 +220,8 @@ while true; do
   printf '\n====== Codex Git provider connections ======\n' >/dev/tty
   printf '  1) GitHub.com\n  2) GitHub Enterprise Server / private GitHub host\n' >/dev/tty
   printf '  3) GitLab.com\n  4) GitLab self-managed / private GitLab host\n' >/dev/tty
-  printf '  5) Bitbucket Cloud\n  6) Azure DevOps Services\n  7) Connection status\n  0) Done\n' >/dev/tty
-  ask "Choose [0-7]: "
+  printf '  5) Bitbucket Cloud\n  6) Azure DevOps Services\n  7) Connection status\n  8) Bitbucket Data Center (private host)\n  0) Done\n' >/dev/tty
+  ask "Choose [0-8]: "
   case "$REPLY" in
     1) link_github github.com github-com || true ;;
     2) link_private "GitHub Enterprise" || true ;;
@@ -206,6 +230,7 @@ while true; do
     5) link_bitbucket || true ;;
     6) link_azure || true ;;
     7) status ;;
+    8) link_bitbucket_private || true ;;
     0|"") break ;;
     *) warn "Invalid choice." ;;
   esac
