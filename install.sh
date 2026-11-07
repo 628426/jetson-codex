@@ -137,8 +137,21 @@ fi
 if [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
   bash ./configure-storage.sh --mount || say "Cloud mount unavailable; health check will report this."
 fi
+# The one-command installer updates changed build inputs automatically.
+# Do not rebuild for README-only changes, or on healthy no-op reruns.
+BUILD_INPUTS=("$DOCKERFILE" "setup-versions.sh" "verify.sh" "entrypoint.sh" "configure-full-trust.py" "codex-connect.sh")
+for input in "${BUILD_INPUTS[@]}"; do
+  [[ -f "$input" ]] || fail "Missing Docker build dependency: $input"
+done
+export JETSON_CODEX_BUILD_HASH="$(sha256sum "${BUILD_INPUTS[@]}" | sha256sum | awk '{print $1}')"
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   BUILD=1
+else
+  installed_hash="$(docker image inspect --format '{{index .Config.Labels "org.jetson-codex.build-hash"}}' "$IMAGE" 2>/dev/null || true)"
+  if [[ "$installed_hash" != "$JETSON_CODEX_BUILD_HASH" ]]; then
+    say "Docker build inputs changed; rebuilding with cached layers where possible."
+    BUILD=1
+  fi
 fi
 if (( BUILD )); then
   say "Building full ARM64 JetPack + Codex image; this is a large build."
@@ -206,6 +219,19 @@ else
   fi
 fi
 
+# Offer the provider menu once. Credentials and SSH keys persist in named volumes.
+if [[ -r /dev/tty && -w /dev/tty ]] && ! docker exec "$CONTAINER" test -f /root/.ssh/.jetson-providers-offered; then
+  printf '\n%s\n' 'Codex supports GitHub, GitHub Enterprise, GitLab, Bitbucket and Azure DevOps.' >/dev/tty
+  printf '%s' 'Link additional Git providers now? [y/N] ' >/dev/tty
+  IFS= read -r provider_answer </dev/tty || provider_answer=n
+  if [[ "$provider_answer" =~ ^[Yy]$ ]]; then
+    docker exec -it "$CONTAINER" codex-connect </dev/tty >/dev/tty 2>&1 \
+      || say "Git provider setup was interrupted; run codex-connect later."
+  fi
+  docker exec "$CONTAINER" touch /root/.ssh/.jetson-providers-offered \
+    || say "Provider onboarding marker not saved; the menu may appear again."
+fi
+
 # Link GitHub once if the user has a terminal; credentials persist in named volume.
 if docker exec "$CONTAINER" gh auth status >/dev/null 2>&1; then
   say "GitHub already linked; skipping OAuth."
@@ -226,8 +252,11 @@ fi
 say "Running health checks"
 if docker exec "$CONTAINER" codex --version >/dev/null 2>&1 \
   && docker exec "$CONTAINER" python3 -c 'import pathlib,tomllib; c=tomllib.loads((pathlib.Path.home()/".codex/config.toml").read_text()); assert c.get("approval_policy")=="never" and c.get("sandbox_mode")=="danger-full-access"' \
+  && docker exec "$CONTAINER" glab --version >/dev/null 2>&1 \
+  && docker exec "$CONTAINER" az devops --help >/dev/null 2>&1 \
+  && docker exec "$CONTAINER" codex-connect --status >/dev/null 2>&1 \
   && docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
-  say "Health OK: Codex executable, full trust and NVIDIA runtime."
+  say "Health OK: Codex, full trust, NVIDIA runtime, GitLab, Azure DevOps and Git connection tools."
 else
   fail "Post-install health check failed."
 fi
@@ -250,6 +279,9 @@ GitHub CLI login (separate, once):
 
 Run Codex:
   docker exec -it jetson-codex codex
+
+Link or inspect Git providers any time:
+  docker exec -it jetson-codex codex-connect
 
 Saved credentials and full-trust settings survive container recreation and image rebuilds.
 WARNING: Codex can execute commands without approval. This container uses host
