@@ -9,6 +9,38 @@ MOUNT="$HOME/jetson-codex-cloud"
 CACHE="$HOME/.cache/jetson-codex/rclone"
 mkdir -p "$CONFIG_DIR" "$CACHE" "$MOUNT"
 chmod 700 "$CONFIG_DIR" "$CACHE"
+# Run as a user systemd service, so mounts survive reboots without sudo.
+install_mount() {
+  [[ -f "$ENV_FILE" ]] || fail "Run configure-storage.sh first."
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  mkdir -p "$RCLONE_MOUNT" "$RCLONE_CACHE" "$HOME/.config/systemd/user"
+  local unit="$HOME/.config/systemd/user/jetson-codex-cloud.service"
+  cat > "$unit" <<EOF
+[Unit]
+Description=Jetson Codex cloud project filesystem
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=notify
+Environment=HOME=$HOME
+ExecStart=$(command -v rclone) mount $RCLONE_SOURCE $RCLONE_MOUNT --vfs-cache-mode full --vfs-cache-max-size 2G --vfs-cache-max-age 1h --vfs-write-back 30s --cache-dir $RCLONE_CACHE --dir-cache-time 5m
+ExecStop=/usr/bin/fusermount3 -uz $RCLONE_MOUNT
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+  systemctl --user daemon-reload
+  systemctl --user enable --now jetson-codex-cloud.service
+  say "Cloud mount service enabled: $RCLONE_MOUNT"
+  if ! loginctl show-user "$USER" -p Linger | grep -q 'Linger=yes'; then
+    say "For mounting after reboot without login, run: sudo loginctl enable-linger $USER"
+  fi
+}
+if [[ "${1:-}" == "--mount" ]]; then install_mount; exit 0; fi
 if ! command -v rclone >/dev/null 2>&1; then
   say "rclone missing. Install with: sudo apt install rclone fuse3"
   exit 2
@@ -38,4 +70,4 @@ rclone lsf "$source_path" --max-depth 1 >/dev/null || fail "Cannot list $source_
 printf 'RCLONE_REMOTE=%q\nRCLONE_SOURCE=%q\nRCLONE_MOUNT=%q\nRCLONE_CACHE=%q\n' "$remote" "$source_path" "$MOUNT" "$CACHE" > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 say "Saved configuration to $ENV_FILE"
-say "Mount on demand with: bash configure-storage.sh --mount"
+install_mount
