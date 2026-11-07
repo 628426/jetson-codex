@@ -77,6 +77,30 @@ RUN install -dm 0755 /etc/apt/keyrings \
 COPY --from=mise-binary /usr/local/bin/mise /usr/local/bin/mise
 RUN mise --version
 
+# Persistent Git hosting clients for GitLab and Azure DevOps.
+# glab is installed from GitLab releases using the mise backend.
+ARG GLAB_VERSION=1.128.0
+RUN mise install "glab${GLAB_VERSION}" \
+    && mise use --global "glab${GLAB_VERSION}" \
+    && glab --version
+
+# Azure DevOps CLI for Azure DevOps Services (not on-prem DevOps Server).
+# Official Microsoft Ubuntu Noble ARM64 APT repository.
+RUN install -dm 0755 /etc/apt/keyrings \
+    && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+      | gpg --dearmor -o /etc/apt/keyrings/microsoft-azure.gpg \
+    && chmod 0644 /etc/apt/keyrings/microsoft-azure.gpg \
+    && printf 'deb [arch=arm64 signed-by=/etc/apt/keyrings/microsoft-azure.gpg] https://packages.microsoft.com/repos/azure-cli/ noble main\n' \
+      > /etc/apt/sources.list.d/azure-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends azure-cli \
+    && rm -rf /var/lib/apt/lists/* \
+    && az --version
+ENV AZURE_EXTENSION_DIR=/opt/azure-cli-extensions
+RUN mkdir -p "${AZURE_EXTENSION_DIR}" \
+    && az extension add --name azure-devops --yes \
+    && az extension show --name azure-devops --query name -o tsv
+
 # Python: all versions in the upstream Codex Universal Dockerfile.
 ARG PYTHON_VERSIONS="3.10 3.11.12 3.12 3.13 3.14.0"
 RUN for v in ${PYTHON_VERSIONS}; do mise install "python@${v}"; done \
@@ -189,8 +213,9 @@ RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
     fi
 
 # Native-device utilities are installed; device access is granted at runtime.
-COPY setup-versions.sh verify.sh entrypoint.sh configure-full-trust.py /opt/jetson-codex/
+COPY setup-versions.sh verify.sh entrypoint.sh configure-full-trust.py codex-connect.sh /opt/jetson-codex/
 RUN chmod 0755 /opt/jetson-codex/*.sh \
+    && ln -sf /opt/jetson-codex/codex-connect.sh /usr/local/bin/codex-connect \
     && mkdir -p /workspace /root/.codex \
     && printf '\n# Jetson Codex development tools\nexport PATH="/root/.phpenv/shims:/root/.phpenv/bin:/root/.local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.swiftly/bin:/usr/local/cuda/bin:$PATH"\n' >> /root/.bashrc
 ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=all
