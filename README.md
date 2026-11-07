@@ -131,12 +131,12 @@ bash ~/jetson-codex/configure-storage.sh --reconfigure
 bash ~/jetson-codex/configure-storage.sh --mount
 
 # Check current system without rebuilding or restarting
-bash ~/jetson-codex/install.sh --check
+bash ~/jetson-codex/install.sh
 # Or via installer (read-only)
-bash ~/jetson-codex/install.sh --check
+bash ~/jetson-codex/install.sh
 
 # Force rebuild only when required
-bash ~/jetson-codex/install.sh --rebuild
+bash ~/jetson-codex/install.sh
 ```
 
 Normal reruns reuse the existing image and running container. The health
@@ -160,36 +160,26 @@ The health checker now parses `/root/.codex/config.toml` using Python
 CUDA compiler and developer tools. These are static/runtime presence checks,
 not an end-to-end Codex agent command execution test.
 
-## One installer for everything
+## One command, every time
 
-`install.sh` now handles host bootstrap, NVIDIA runtime configuration,
-optional Ubuntu unattended security updates, persistent deployment and
-read-only health checks. The old standalone `healthcheck.sh`,
-`setup-nvidia-runtime.sh` and `setup-autoupdates.sh` were removed.
-
-Run under your existing account (preserves existing installations):
+Run the same command for initial setup, repair and health checks:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash
 ```
 
-For a new, dedicated account, explicitly select:
+No flags. The installer detects JetPack, uses the invoking Linux account
+for persistent files and OAuth, configures Docker access with sudo if
+needed, installs the NVIDIA runtime and unattended security updates,
+reuses an existing image and healthy container, links accounts when
+needed, and runs integrated health checks. It does not create a second
+service account: the invoking user is the inspectable owner of the
+installation. Docker group access is root-equivalent.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --service-user
-```
-
-This creates `jetson-codex` if absent and grants it Docker group access.
-**Docker group access is root-equivalent**; this is a service identity, not
-a sandboxed security boundary. It does not migrate `dex`'s existing
-credentials or workspace. Avoid selecting this on an already-configured
-installation unless a separate account is intentional.
-
-Health checks without installation changes:
-
-```bash
-bash ~/jetson-codex/install.sh --check
-```
+The installer does not automatically rebuild an existing image when the
+Dockerfile changes. This avoids lengthy unexpected builds, but means
+updating the Dockerfile requires an explicit image rebuild outside the
+one-command path until image revision tracking is implemented.
 
 ## One-command install or update
 
