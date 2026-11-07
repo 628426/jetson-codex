@@ -66,6 +66,8 @@ this Orin; firmware detection alone cannot guarantee its dependencies work.
 
 ## One-command install or update
 
+After starting the container, the installer checks `codex login status`. If already linked, it skips login. Otherwise, when run from an interactive terminal (including `curl ... | bash` over SSH), it launches `codex login --device-auth` automatically and displays the one-time code. Open **https://auth.openai.com/codex/device** on your laptop or phone to approve. If no terminal is available or login fails, the container stays running and the installer prints a retry command. GitHub CLI authentication remains a separate, optional step.
+
 On a Jetson Orin with Docker, Docker Compose v2, and the NVIDIA container
 runtime already installed, run this **as your normal Docker-enabled user**:
 
