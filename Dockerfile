@@ -189,7 +189,7 @@ RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
     fi
 
 # Native-device utilities are installed; device access is granted at runtime.
-COPY setup-versions.sh verify.sh entrypoint.sh /opt/jetson-codex/
+COPY setup-versions.sh verify.sh entrypoint.sh configure-full-trust.py /opt/jetson-codex/
 RUN chmod 0755 /opt/jetson-codex/*.sh \
     && mkdir -p /workspace /root/.codex \
     && printf '\n# Jetson Codex development tools\nexport PATH="/root/.phpenv/shims:/root/.phpenv/bin:/root/.local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.swiftly/bin:/usr/local/cuda/bin:$PATH"\n' >> /root/.bashrc
