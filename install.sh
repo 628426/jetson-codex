@@ -6,7 +6,8 @@ set -Eeuo pipefail
 
 REPO_URL="https://github.com/628426/jetson-codex.git"
 REPO_DIR="${JETSON_CODEX_DIR:-${HOME:?HOME must be set}/jetson-codex}"
-IMAGE="jetson-codex:jp72-full"
+IMAGE=""
+DOCKERFILE=""
 CONTAINER="jetson-codex"
 MODE="hardware"
 BUILD=1
@@ -46,11 +47,20 @@ while (( $# )); do
 done
 
 [[ "$(uname -s)" == "Linux" ]] || fail "Linux is required."
-[[ -f /etc/os-release ]] && . /etc/os-release
-[[ "${VERSION_ID:-}" == "24.04" ]] || fail "JetPack 7 target requires Ubuntu 24.04 (found ${VERSION_ID:-unknown})."
-if [[ -f /etc/nv_tegra_release ]]; then
-  grep -q "^# R39" /etc/nv_tegra_release || fail "Expected Jetson Linux R39 (JetPack 7.2)."
-fi
+[[ -f /etc/os-release ]] || fail "Cannot identify host OS."
+. /etc/os-release
+[[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == "24.04" ]] || fail "Expected Ubuntu 24.04; found ${PRETTY_NAME:-unknown}."
+[[ -f /etc/nv_tegra_release ]] || fail "Missing /etc/nv_tegra_release; cannot safely select JetPack image."
+l4t="$(sed -nE 's/^# R([0-9]+) \(release\), REVISION: ([0-9]+\.[0-9]+).*/\1.\2/p' /etc/nv_tegra_release | head -n 1)"
+case "$l4t" in
+  39.2.0)
+    DOCKERFILE="Dockerfile.jetpack-7.2.0"
+    IMAGE="jetson-codex:jp72-full"
+    ;;
+  *) fail "Unsupported L4T $l4t. No Dockerfile selected; refusing to guess compatibility." ;;
+esac
+export JETSON_CODEX_DOCKERFILE="$DOCKERFILE" JETSON_CODEX_IMAGE="$IMAGE"
+say "Detected L4T $l4t; selected $DOCKERFILE ($IMAGE)"
 case "$(uname -m)" in
   aarch64|arm64) ;;
   *) fail "This image is for a native ARM64 Jetson. Host architecture is $(uname -m)." ;;
@@ -84,6 +94,7 @@ else
 fi
 
 cd "$REPO_DIR"
+[[ -f "$DOCKERFILE" ]] || fail "Selected Dockerfile missing: $DOCKERFILE"
 mkdir -p workspace
 
 if (( BUILD )); then
