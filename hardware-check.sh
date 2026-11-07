@@ -9,7 +9,7 @@ devices() {
   local paths=()
   # NVIDIA GPU, NVDEC, VIC, NVJPG and optional other nvhost engines.
   # Camera/media, I2C, SPI, GPIO, and hot-pluggable USB serial interfaces.
-  for node in /dev/nvhost* /dev/nvmap /dev/nvidia* /dev/dri/renderD* \
+  for node in /dev/nvhost* /dev/nvmap /dev/nvidia* /dev/dri/renderD* /dev/dri/card* \
               /dev/video[0-9]* /dev/media[0-9]* /dev/v4l-subdev* \
               /dev/i2c-[0-9]* /dev/spidev* /dev/gpiochip[0-9]* \
               /dev/ttyUSB[0-9]* /dev/ttyACM[0-9]*; do
@@ -55,8 +55,26 @@ video() {
   return "$result"
 }
 
+cuda() {
+  # CUDA is checked with the *driver API*, not nvcc presence. Stock Python3
+  # and ctypes suffice; no CUDA compiler or development packages on the host.
+  python3 - <<'PY'
+import ctypes
+cuda = ctypes.CDLL("libcuda.so.1")
+code = cuda.cuInit(0)
+if code != 0:
+    raise SystemExit(f"CUDA driver initialisation returned {code}")
+count = ctypes.c_int()
+code = cuda.cuDeviceGetCount(ctypes.byref(count))
+if code != 0 or count.value < 1:
+    raise SystemExit(f"CUDA device count failed: status={code}, count={count.value}")
+print(f"CUDA devices: {count.value}")
+PY
+}
+
 case "${1:---devices}" in
   --devices) devices ;;
   --video) video ;;
-  *) echo "Usage: hardware-check.sh [--devices|--video]" >&2; exit 2 ;;
+  --cuda) cuda ;;
+  *) echo "Usage: hardware-check.sh [--devices|--cuda|--video]" >&2; exit 2 ;;
 esac
