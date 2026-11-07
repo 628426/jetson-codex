@@ -25,8 +25,8 @@ After=network-online.target
 [Service]
 Type=notify
 Environment=HOME=$HOME
-ExecStart=$(command -v rclone) mount $RCLONE_SOURCE $RCLONE_MOUNT --vfs-cache-mode full --vfs-cache-max-size 2G --vfs-cache-max-age 1h --vfs-write-back 30s --cache-dir $RCLONE_CACHE --dir-cache-time 5m
-ExecStop=/usr/bin/fusermount3 -uz $RCLONE_MOUNT
+ExecStart=/bin/bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cloud-mount.sh"
+ExecStop=/usr/bin/fusermount3 -uz "$RCLONE_MOUNT"
 Restart=on-failure
 RestartSec=10
 
@@ -34,7 +34,8 @@ RestartSec=10
 WantedBy=default.target
 EOF
   systemctl --user daemon-reload
-  systemctl --user enable --now jetson-codex-cloud.service
+  systemctl --user enable jetson-codex-cloud.service
+  systemctl --user restart jetson-codex-cloud.service
   say "Cloud mount service enabled: $RCLONE_MOUNT"
   if ! loginctl show-user "$USER" -p Linger | grep -q 'Linger=yes'; then
     say "For mounting after reboot without login, run: sudo loginctl enable-linger $USER"
