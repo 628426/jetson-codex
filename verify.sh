@@ -23,6 +23,7 @@ check 'TensorRT' bash -lc 'ldconfig -p | grep -F libnvinfer.so'
 check 'cuDNN' bash -lc 'ldconfig -p | grep -F libcudnn.so'
 check 'VPI' bash -lc 'ldconfig -p | grep -F libnvvpi.so'
 check 'DeepStream GStreamer' gst-inspect-1.0 nvinfer
+check 'H264/H265 NVDEC' bash /opt/jetson-codex/hardware-check.sh --video
 check 'Python' python3 --version
 check 'Installed Pythons' mise ls python
 check 'Node.js' node --version
