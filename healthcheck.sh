@@ -10,6 +10,11 @@ if docker info >/dev/null 2>&1; then ok 'Docker daemon'; else bad 'Docker daemon
 if docker compose version >/dev/null 2>&1; then ok 'Compose'; else bad 'Compose'; fi
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx jetson-codex; then
   ok 'Codex container running'
+  if docker exec jetson-codex codex --version >/dev/null 2>&1; then ok 'Codex CLI executable'; else bad 'Codex CLI missing'; fi
+  if docker exec jetson-codex python3 -c 'import pathlib,tomllib; p=pathlib.Path.home()/".codex/config.toml"; c=tomllib.loads(p.read_text()); assert c.get("approval_policy")=="never" and c.get("sandbox_mode")=="danger-full-access"' >/dev/null 2>&1; then
+    ok 'Codex full trust persisted'
+  else bad 'Codex full trust missing or invalid'; fi
+  if docker exec jetson-codex bash -c 'command -v nvcc && command -v gh && command -v git && command -v mise' >/dev/null 2>&1; then ok 'CUDA and developer tools'; else bad 'CUDA or developer tools missing'; fi
   if docker exec jetson-codex codex login status >/dev/null 2>&1; then ok 'Codex authenticated'; else bad 'Codex not authenticated'; fi
   if docker exec jetson-codex test -d /workspace/projects; then ok 'Cloud path exposed to container'; else bad 'Cloud path missing in container'; fi
   if docker exec jetson-codex gh auth status >/dev/null 2>&1; then ok 'GitHub authenticated'; else warn 'GitHub CLI not authenticated'; fi
@@ -24,6 +29,7 @@ if [[ -f "$conf" ]]; then
   else bad "Cloud mount not active: $RCLONE_MOUNT"; fi
   if systemctl --user is-enabled --quiet jetson-codex-cloud.service; then ok 'Cloud mount enabled at login'; else bad 'Cloud mount service disabled'; fi
 else warn 'Cloud storage not configured'; fi
+if bash "$(dirname "$0")/setup-autoupdates.sh" --check >/dev/null 2>&1; then ok 'Ubuntu unattended security updates'; else warn 'Ubuntu unattended security updates not configured'; fi
 df -h / | tail -n 1
 docker system df 2>/dev/null || true
 exit "$failures"
