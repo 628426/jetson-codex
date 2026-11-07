@@ -61,29 +61,37 @@ if [[ -f "$ENV_FILE" && "${1:-}" != "--reconfigure" ]]; then
   exit 0
 fi
 [[ -r /dev/tty && -w /dev/tty ]] || fail "Interactive SSH terminal required to link cloud storage."
-cat >/dev/tty <<'GUIDE'
+if [[ "${RCLONE_SSH_TUNNEL:-0}" == "1" ]]; then
+  cat >/dev/tty <<'GUIDE'
 
 ========================================================
-  CLOUD STORAGE: HEADLESS JETSON SETUP
+  CLOUD STORAGE: ONE-CLICK WINDOWS BROWSER LOGIN
 ========================================================
-  The Jetson has NO browser. Microsoft/Google expect
-  OAuth to return to localhost:53682. A direct LAN-IP
-  redirect would fail their registered OAuth callback.
+  SSH port forwarding is enabled.
 
-  To link a new drive, install rclone on your Windows PC:
-  https://rclone.org/downloads/
+  1. Follow the rclone prompts to select OneDrive or Google Drive.
+  2. The installer answers Y to automatic browser login.
+  3. Open the http://127.0.0.1:53682/... URL on your Windows PC.
+  4. Approve the Microsoft/Google access request.
 
-  When the Jetson prints an rclone authorize command:
-    1. Run that EXACT command in Windows PowerShell.
-    2. Complete Microsoft/Google login in your PC browser.
-    3. Copy the token printed in PowerShell.
-    4. Paste the token into this SSH terminal.
-
-  Do NOT paste the Jetson install command at a token prompt.
-  Authorisation help: https://rclone.org/remote_setup/
+  The callback travels back to the Jetson over your SSH connection.
+  No Windows rclone, token JSON or second terminal needed.
 ========================================================
 
 GUIDE
+else
+  cat >/dev/tty <<'GUIDE'
+
+========================================================
+  CLOUD STORAGE: HEADLESS JETSON
+========================================================
+  This SSH connection has no OAuth port forwarding.
+  To avoid copying tokens, restart using the PowerShell
+  command printed by install.sh when you select cloud setup.
+========================================================
+
+GUIDE
+fi
 
 remote=""
 mapfile -t remotes < <(rclone listremotes | sed 's/:$//')
