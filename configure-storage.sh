@@ -58,8 +58,31 @@ if [[ -f "$ENV_FILE" && "${1:-}" != "--reconfigure" ]]; then
   exit 0
 fi
 [[ -r /dev/tty && -w /dev/tty ]] || fail "Interactive terminal required for initial OAuth setup."
-say "Configure OneDrive or Google Drive using rclone's interactive wizard."
-say "For a headless Jetson, choose browser-less auth and complete OAuth on your PC."
+cat >/dev/tty <<'GUIDE'
+
+========================================================
+  CLOUD STORAGE LINKING (headless Jetson)
+========================================================
+  1. Choose 'n' to create a new rclone remote.
+  2. Name it 'onedrive' or 'gdrive'.
+  3. Select Microsoft OneDrive or Google Drive.
+  4. Leave client ID and secret blank for defaults.
+  5. When asked to open a browser automatically, choose N.
+
+  On your Windows PC:
+    Install rclone: https://rclone.org/downloads/
+    Open PowerShell and run the rclone authorize command
+    EXACTLY as printed by the Jetson wizard.
+    Complete browser sign-in on the PC.
+    Paste the resulting token JSON into the SSH terminal.
+
+  Return to SSH, complete drive selection and choose 'q'.
+
+  OneDrive: https://rclone.org/onedrive/
+  Google Drive: https://rclone.org/drive/
+========================================================
+
+GUIDE
 rclone config </dev/tty >/dev/tty 2>&1
 mapfile -t remotes < <(rclone listremotes | sed 's/:$//')
 (("${#remotes[@]}" > 0)) || fail "No rclone remotes configured."
