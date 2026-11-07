@@ -2,7 +2,7 @@
 # One ARM64 environment: native NVIDIA JetPack libraries + Codex Universal's toolchain inventory.
 # Target host: Jetson Orin, JetPack 7.2 / L4T 39.2.
 # NOT a rebuild of OpenAI's official image; this is an independently maintained port.
-ARG JETPACK_IMAGE=nvcr.io/nvidia/cuda:13.0.0-devel-ubuntu24.04
+ARG JETPACK_IMAGE=nvcr.io/nvidia/deepstream:9.1-triton-multiarch
 # Official static ARM64 mise binary, avoiding a build-time dependency on mise.run DNS.
 FROM ghcr.io/jdx/mise:2026.10.4 AS mise-binary
 FROM ${JETPACK_IMAGE}
@@ -21,8 +21,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     UV_NO_PROGRESS=1
 ENV PATH="/root/.phpenv/shims:/root/.phpenv/bin:/root/.local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.swiftly/bin:/usr/local/cuda/bin:${PATH}"
 
-# Noble (Ubuntu 24.04) packages. NVIDIA CUDA devel image is the documented
-# official JetPack 7-compatible base; TensorRT/VPI/DeepStream are NOT bundled.
+# Noble (Ubuntu 24.04) packages. Official Jetson DeepStream 9.1 Triton image
+# supplies CUDA 13.2, TensorRT, cuDNN, GStreamer plugins and DeepStream runtime.
+# NVIDIA documents Jetson DeepStream containers as deployment-oriented: verify
+# native SDK headers separately. VPI is installed explicitly below.
 # Never upgrade the host BSP from inside a container.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     autoconf automake bash-completion binutils bison build-essential \
@@ -43,6 +45,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata universal-ctags unixodbc-dev unzip usbutils uuid-dev \
     v4l-utils wget xz-utils yasm zip zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# VPI is a separate JetPack SDK component. Require the NVIDIA VPI 4 packages;
+# fail the build rather than quietly shipping a GPU-only image without VPI.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libnvvpi4 vpi4-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify the NVIDIA runtime stack at build time (hardware execution at run time).
+RUN command -v nvcc \
+    && ldconfig -p | grep -q 'libnvinfer.so' \
+    && ldconfig -p | grep -q 'libcudnn.so' \
+    && ldconfig -p | grep -q 'libnvvpi.so' \
+    && test -d /opt/nvidia/deepstream \
+    && command -v gst-inspect-1.0
 
 # Official GitHub CLI APT repository, which ships current ARM64 builds.
 RUN install -dm 0755 /etc/apt/keyrings \
