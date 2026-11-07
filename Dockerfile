@@ -173,9 +173,14 @@ ARG RUBY_VERSIONS="3.4.4 3.3.8 3.2.3"
 RUN for v in ${RUBY_VERSIONS}; do mise install "ruby@${v}"; done \
     && mise use --global ruby@3.4.4
 ENV KERL_CONFIGURE_OPTIONS="--without-wx --without-javac"
+# Erlang must be activated before Elixir's installation validation runs 'erl'.
+# Keep it in its own Docker layer to preserve the expensive compilation cache.
 RUN mise install erlang@27.1.2 \
-    && mise install elixir@1.18.3-otp-27 \
-    && mise use --global erlang@27.1.2 elixir@1.18.3-otp-27
+    && mise use --global erlang@27.1.2 \
+    && mise exec erlang@27.1.2 -- erl -noshell -eval 'halt().'
+RUN mise exec erlang@27.1.2 -- mise install elixir@1.18.3-otp-27 \
+    && mise use --global elixir@1.18.3-otp-27 \
+    && mise exec erlang@27.1.2 -- elixir --version
 
 # Bazelisk / bazel. See upstream's pinned version and release naming.
 ARG BAZELISK_VERSION=v1.26.0
