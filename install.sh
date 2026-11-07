@@ -139,7 +139,7 @@ if [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
 fi
 # The one-command installer updates changed build inputs automatically.
 # Do not rebuild for README-only changes, or on healthy no-op reruns.
-BUILD_INPUTS=("$DOCKERFILE" "setup-versions.sh" "verify.sh" "entrypoint.sh" "configure-full-trust.py" "codex-connect.sh")
+BUILD_INPUTS=("$DOCKERFILE" "setup-versions.sh" "verify.sh" "entrypoint.sh" "configure-full-trust.py" "codex-connect.sh" "hardware-check.sh")
 for input in "${BUILD_INPUTS[@]}"; do
   [[ -f "$input" ]] || fail "Missing Docker build dependency: $input"
 done
@@ -163,11 +163,71 @@ else
   say "Reusing existing image: $IMAGE"
 fi
 
+# The existing container may predate support for the NVDEC/VIC/NVJPG
+# character devices. Check the explicitly mapped host paths and refresh
+# only if a required device is not listed in Docker's --device mappings.
+explicit_devices_current() {
+  local missing
+  missing="$(comm -23 \
+    <(bash ./hardware-check.sh --devices) \
+    <(docker inspect --format '{{range .HostConfig.Devices}}{{println .PathOnHost}}{{end}}' "$CONTAINER" 2>/dev/null | LC_ALL=C sort -u))"
+  [[ -z "$missing" ]]
+}
+
+hardware_health() {
+  local hostlist dockerlist missingfile hostcount dockercount host_cuda docker_cuda
+  hostlist="$(mktemp)"
+  dockerlist="$(mktemp)"
+  missingfile="$(mktemp)"
+  say "Checking Jetson hardware on HOST (no host SDK packages needed)."
+  bash ./hardware-check.sh --devices > "$hostlist"
+  hostcount="$(wc -l < "$hostlist")"
+  say "Host character devices selected for passthrough: $hostcount"
+  if grep -E '/dev/nvhost-[^ ]*(nvdec|vic|nvjpg)' "$hostlist" >/dev/null; then
+    say "Host NVIDIA multimedia engine nodes detected."
+  else
+    say "No named NVDEC/VIC/NVJPG nodes found on host; decoder execution test is decisive."
+  fi
+  if host_cuda="$(bash ./hardware-check.sh --cuda 2>&1)"; then
+    say "Host $host_cuda"
+  else
+    say "Host CUDA driver probe unavailable: $host_cuda"
+  fi
+
+  say "Checking same hardware inside DOCKER."
+  docker exec "$CONTAINER" bash /opt/jetson-codex/hardware-check.sh --devices > "$dockerlist" \
+    || fail "Cannot inventory the container hardware nodes."
+  dockercount="$(wc -l < "$dockerlist")"
+  say "Container matching hardware device nodes: $dockercount"
+  comm -23 "$hostlist" "$dockerlist" > "$missingfile"
+  if [[ -s "$missingfile" ]]; then
+    say "ERROR: Host character devices not visible inside Docker:"
+    sed 's/^/  MISSING: /' "$missingfile" >&2
+    rm -f "$hostlist" "$dockerlist" "$missingfile"
+    fail "Hardware passthrough incomplete. No blanket --privileged mode was enabled."
+  fi
+  rm -f "$hostlist" "$dockerlist" "$missingfile"
+  say "PASS: Every selected host character device is visible inside Docker."
+
+  if docker_cuda="$(docker exec "$CONTAINER" bash /opt/jetson-codex/hardware-check.sh --cuda 2>&1)"; then
+    say "Container $docker_cuda"
+    if [[ "$host_cuda" == CUDA* && "$host_cuda" != "$docker_cuda" ]]; then
+      fail "CUDA GPU device count differs between host and container."
+    fi
+  else
+    fail "CUDA driver access failed inside Docker: $docker_cuda"
+  fi
+
+  say "Running actual H.264 decode through the Jetson hardware decoder."
+  docker exec "$CONTAINER" bash /opt/jetson-codex/hardware-check.sh --video \
+    || fail "NVDEC test failed: check NVIDIA runtime, GStreamer plugins and driver/device compatibility."
+}
+
 if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
   current_image="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")"
   [[ "$current_image" == "$IMAGE" ]] || fail "A container named '$CONTAINER' already exists using '$current_image'. Not replacing an unrelated container."
   if [[ "$MODE" == "hardware" ]]; then
-    if (( BUILD )) || ! docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER" || ! docker exec "$CONTAINER" test -d /workspace/projects; then
+    if (( BUILD )) || ! docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER" || ! docker exec "$CONTAINER" test -d /workspace/projects || ! explicit_devices_current; then
       say "Refreshing hardware container (persistent volumes retained)."
       docker rm -f "$CONTAINER" >/dev/null
     else
@@ -195,6 +255,9 @@ fi
 if ! docker ps --filter "name=^/$CONTAINER$" --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
   fail "$CONTAINER is not running; inspect 'docker logs $CONTAINER'."
 fi
+
+# Verify NVIDIA devices and execute a real NVDEC decode on every rerun.
+hardware_health
 
 # User-requested full trust: Codex may execute commands without approval prompts.
 # Persist in the existing Codex auth volume; keep the container boundary.
