@@ -209,6 +209,60 @@ Dockerfile changes. This avoids lengthy unexpected builds, but means
 updating the Dockerfile requires an explicit image rebuild outside the
 one-command path until image revision tracking is implemented.
 
+## Persistent Git provider connections
+
+The Jetson Codex container now has **Git, Git LFS, GitHub CLI (`gh`),
+GitLab CLI (`glab`), Azure CLI (`az`) and the Azure DevOps extension**.
+One installer command still provisions and repairs everything. After
+first installation it offers a one-time menu to link additional providers.
+You can reopen that menu without rebuilding:
+
+```bash
+docker exec -it jetson-codex codex-connect
+```
+
+| Provider | Git clone/push | Repository management |
+|---|---|---|
+| GitHub.com | SSH (Ed25519) | `gh` issues, pull requests, releases |
+| GitHub Enterprise Server | Per-host SSH (Ed25519) | `gh --hostname` / `GH_HOST` |
+| GitLab.com | SSH (Ed25519) | `glab` issues, merge requests, pipelines |
+| GitLab Self-Managed | Per-host SSH (Ed25519) | `glab` for supported instances |
+| Bitbucket Cloud | SSH (Ed25519) | Git push/pull; API/PR access needs separate authorisation |
+| Azure DevOps Services | SSH (**RSA 3072, RSA-SHA2**) | `az repos`, `az boards`, `az pipelines` |
+
+A separate SSH key is created for each provider/host. The public key is
+either uploaded using `gh`/`glab` after device-code login or displayed
+for addition to your Bitbucket/Azure account. Private keys never leave
+the container's persistent Docker SSH volume. The menu can connect
+private GitHub Enterprise or GitLab hosts by DNS name, and it never
+overwrites an existing key.
+
+Git credentials are preserved in named Docker volumes
+(`jetson-github-auth`, `jetson-codex-gitlab-auth`,
+`jetson-codex-azure-auth`, `jetson-codex-git-ssh`).
+Unattended SSH uses **unencrypted, host-specific private keys** inside
+the protected volume, and depends on the remote account's access control.
+Protect Docker access and back up the volumes securely. Your Git repository
+working trees stay in `/workspace/source` on NVMe, not the cloud FUSE
+directory; scripts and documents can be written to `/workspace/projects`
+for OneDrive/Google Drive write-back.
+
+**Important:** Azure DevOps Services accepts RSA keys for Git SSH, not
+Ed25519. Azure DevOps Server (on-premises) is not supported by Microsoft's
+`az devops` extension, though Git SSH access to an on-prem server can be
+configured separately. GitLab Self-Managed OAuth device flow requires an
+instance version and application configuration that supports it; otherwise
+the menu offers an interactive personal access token alternative.
+GitHub Enterprise may also require your administrator to enable
+the chosen authentication method. Organisation policies, branch
+protections, token expiration and provider consent still apply.
+
+**Rebuild behaviour:** `install.sh` fingerprints the selected Dockerfile
+and its build scripts. Running the same no-argument command rebuilds when
+those inputs change, but otherwise reuses the image and persisted
+credentials. This is a source-level configuration; it has **not yet passed
+a full ARM64 build or provider OAuth test on dexson**.
+
 ## One-command install or update
 
 After starting the container, the installer checks `codex login status`. If already linked, it skips login. Otherwise, when run from an interactive terminal (including `curl ... | bash` over SSH), it launches `codex login --device-auth` automatically and displays the one-time code. Open **https://auth.openai.com/codex/device** on your laptop or phone to approve. If no terminal is available or login fails, the container stays running and the installer prints a retry command. GitHub CLI authentication remains a separate, optional step.
