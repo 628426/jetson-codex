@@ -60,48 +60,82 @@ if [[ -f "$ENV_FILE" && "${1:-}" != "--reconfigure" ]]; then
   say "Existing storage configuration found. Use --reconfigure to change it."
   exit 0
 fi
-[[ -r /dev/tty && -w /dev/tty ]] || fail "Interactive terminal required for initial OAuth setup."
+[[ -r /dev/tty && -w /dev/tty ]] || fail "Interactive SSH terminal required to link cloud storage."
 cat >/dev/tty <<'GUIDE'
 
 ========================================================
-  CLOUD STORAGE LINKING (headless Jetson)
+  CLOUD STORAGE: HEADLESS JETSON SETUP
 ========================================================
-  1. Choose 'n' to create a new rclone remote.
-  2. Name it 'onedrive' or 'gdrive'.
-  3. Select Microsoft OneDrive or Google Drive.
-  4. Leave client ID and secret blank for defaults.
-  5. When asked to open a browser automatically, choose N.
+  The Jetson has NO browser. This setup will never open
+  http://127.0.0.1 on the Jetson.
 
-  On your Windows PC:
-    Install rclone: https://rclone.org/downloads/
-    Open PowerShell and run the rclone authorize command
-    EXACTLY as printed by the Jetson wizard.
-    Complete browser sign-in on the PC.
-    Paste the resulting token JSON into the SSH terminal.
+  To link a new drive, install rclone on your Windows PC:
+  https://rclone.org/downloads/
 
-  Return to SSH, complete drive selection and choose 'q'.
+  When the Jetson prints an rclone authorize command:
+    1. Run that EXACT command in Windows PowerShell.
+    2. Complete Microsoft/Google login in your PC browser.
+    3. Copy the token printed in PowerShell.
+    4. Paste the token into this SSH terminal.
 
-  OneDrive: https://rclone.org/onedrive/
-  Google Drive: https://rclone.org/drive/
+  Do NOT paste the Jetson install command at a token prompt.
+  Authorisation help: https://rclone.org/remote_setup/
 ========================================================
 
 GUIDE
-rclone config </dev/tty >/dev/tty 2>&1
+
+remote=""
 mapfile -t remotes < <(rclone listremotes | sed 's/:$//')
-(("${#remotes[@]}" > 0)) || fail "No rclone remotes configured."
-printf 'Available remotes:\n' >/dev/tty
-printf '  %s\n' "${remotes[@]}" >/dev/tty
-printf 'Remote name: ' >/dev/tty
-IFS= read -r remote </dev/tty
-[[ " ${remotes[*]} " == *" $remote "* ]] || fail "Unknown remote"
-printf 'Cloud root folder (e.g. Codex, blank for drive root): ' >/dev/tty
+if ((${#remotes[@]} > 0)); then
+  printf 'Existing rclone remotes:\n' >/dev/tty
+  printf '  %s\n' "${remotes[@]}" >/dev/tty
+  printf 'Enter an existing remote to use, or Enter to link a new one: ' >/dev/tty
+  IFS= read -r chosen </dev/tty
+  if [[ -n "$chosen" ]]; then
+    for candidate in "${remotes[@]}"; do
+      if [[ "$candidate" == "$chosen" ]]; then remote="$chosen"; break; fi
+    done
+    [[ -n "$remote" ]] || fail "No such rclone remote: $chosen"
+  fi
+fi
+
+if [[ -z "$remote" ]]; then
+  printf '\nSelect cloud provider:\n  1) Microsoft OneDrive\n  2) Google Drive\nProvider [1/2]: ' >/dev/tty
+  IFS= read -r choice </dev/tty
+  case "$choice" in
+    1|onedrive|OneDrive) backend="onedrive"; remote="jetson-onedrive" ;;
+    2|drive|gdrive|Google) backend="drive"; remote="jetson-gdrive" ;;
+    *) fail "Choose 1 for OneDrive or 2 for Google Drive." ;;
+  esac
+  if printf '%s\n' "${remotes[@]}" | grep -Fxq "$remote"; then
+    fail "Remote '$remote' exists. Re-run and select it from the existing remotes list."
+  fi
+
+  say "Creating $remote using HEADLESS authentication (config_is_local=false)."
+  say "The Jetson will print an rclone authorize command for your Windows PC."
+  # Avoid the normal interactive wizard's default auto-configuration, which
+  # binds OAuth to the Jetson's localhost rather than your Windows machine.
+  rclone config create "$remote" "$backend" config_is_local=false </dev/tty >/dev/tty 2>&1 \
+    || fail "Cloud authorisation was not completed. Re-run the installer to retry."
+fi
+
+say "Checking that $remote is accessible."
+timeout 45 rclone lsf "$remote:" --max-depth 1 >/dev/null \
+  || fail "Remote '$remote' could not be listed. Check its OAuth credentials and rerun."
+
+printf 'Cloud project root folder [Codex]: ' >/dev/tty
 IFS= read -r folder </dev/tty
-[[ "$folder" != *'..'* && "$folder" != /* ]] || fail "Invalid cloud root"
-source_path="$remote:"
-[[ -z "$folder" ]] || source_path+="$folder"
-# Validate access without uploading/deleting any files.
-rclone lsf "$source_path" --max-depth 1 >/dev/null || fail "Cannot list $source_path. Create the cloud folder first."
+folder="${folder:-Codex}"
+[[ "$folder" != *'..'* && "$folder" != /* && "$folder" != *:* ]] || fail "Invalid cloud root folder."
+source_path="$remote:$folder"
+
+if ! timeout 45 rclone lsf "$source_path" --max-depth 1 >/dev/null 2>&1; then
+  say "Creating cloud project folder: $source_path"
+  rclone mkdir "$source_path" || fail "Could not create cloud project folder."
+fi
+timeout 45 rclone lsf "$source_path" --max-depth 1 >/dev/null \
+  || fail "Cloud project folder is not accessible."
 printf 'RCLONE_REMOTE=%q\nRCLONE_SOURCE=%q\nRCLONE_MOUNT=%q\nRCLONE_CACHE=%q\n' "$remote" "$source_path" "$MOUNT" "$CACHE" > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 say "Saved configuration to $ENV_FILE"
-install_mount
+install_mount "${1:-}"
