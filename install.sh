@@ -42,7 +42,9 @@ while (( $# )); do
   case "$1" in
     --hardware) MODE="hardware" ;;
     --gpu-only) MODE="compose" ;;
-    --no-build) NO_BUILD=1 ;;\n    --rebuild) FORCE_BUILD=1 ;;\n    --check) HEALTH_ONLY=1 ;;
+    --no-build) NO_BUILD=1 ;;
+    --rebuild) FORCE_BUILD=1 ;;
+    --check) HEALTH_ONLY=1 ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown argument: $1 (use --help)" ;;
   esac
