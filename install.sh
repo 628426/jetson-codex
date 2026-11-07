@@ -13,8 +13,8 @@ MODE="hardware"
 BUILD=0
 NEED_NVIDIA_RUNTIME=0
 
-say() { printf '[jetson-codex] %s\\n' "$*"; }
-fail() { printf '[jetson-codex] ERROR: %s\\n' "$*" >&2; exit 1; }
+say() { printf '[jetson-codex] %s\n' "$*"; }
+fail() { printf '[jetson-codex] ERROR: %s\n' "$*" >&2; exit 1; }
 
 (( $# == 0 )) || fail "No parameters supported. Run install.sh without arguments."
 [[ $EUID -ne 0 ]] || fail "Run as your normal account, not sudo."
