@@ -134,6 +134,12 @@ if ! docker ps --filter "name=^/$CONTAINER$" --format '{{.Names}}' | grep -Fxq "
   fail "$CONTAINER is not running; inspect 'docker logs $CONTAINER'."
 fi
 
+# User-requested full trust: Codex may execute commands without approval prompts.
+# Persist in the existing Codex auth volume; keep the container boundary.
+say "Configuring Codex full trust (no approvals, unrestricted container filesystem)"
+docker exec "$CONTAINER" python3 /opt/jetson-codex/configure-full-trust.py \
+  || fail "Could not configure Codex full-trust defaults."
+
 # Interactive authentication requires a real TTY. curl | bash does not always
 # provide stdin to the script, so attach docker exec to /dev/tty explicitly.
 say "Checking existing Codex login"
@@ -170,5 +176,7 @@ GitHub CLI login (separate, once):
 Run Codex:
   docker exec -it jetson-codex codex
 
-Saved credentials survive container recreation and image rebuilds.
+Saved credentials and full-trust settings survive container recreation and image rebuilds.
+WARNING: Codex can execute commands without approval. This container uses host
+networking and has access to mapped hardware and your mounted workspace.
 DONE
