@@ -19,9 +19,9 @@ check 'Azure CLI' az --version
 check 'Azure DevOps CLI' az devops --help
 check 'CUDA compiler' nvcc --version
 check 'DeepStream' bash -lc 'test -d /opt/nvidia/deepstream/deepstream-9.1 && echo DeepStream-9.1'
-check 'TensorRT' bash -lc 'ldconfig -p | grep -m1 libnvinfer.so'
-check 'cuDNN' bash -lc 'ldconfig -p | grep -m1 libcudnn.so'
-check 'VPI' bash -lc 'ldconfig -p | grep -m1 libnvvpi.so'
+check 'TensorRT' bash -lc 'ldconfig -p | grep -F libnvinfer.so'
+check 'cuDNN' bash -lc 'ldconfig -p | grep -F libcudnn.so'
+check 'VPI' bash -lc 'ldconfig -p | grep -F libnvvpi.so'
 check 'DeepStream GStreamer' gst-inspect-1.0 nvinfer
 check 'Python' python3 --version
 check 'Installed Pythons' mise ls python
