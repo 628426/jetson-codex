@@ -131,7 +131,7 @@ bash ~/jetson-codex/configure-storage.sh --reconfigure
 bash ~/jetson-codex/configure-storage.sh --mount
 
 # Check current system without rebuilding or restarting
-bash ~/jetson-codex/healthcheck.sh
+bash ~/jetson-codex/install.sh --check
 # Or via installer (read-only)
 bash ~/jetson-codex/install.sh --check
 
@@ -149,7 +149,7 @@ on the actual Orin**.
 The installer now offers **Ubuntu unattended security updates**, using
 `unattended-upgrades`, daily APT timers and weekly APT cache cleaning.
 It invokes `sudo` interactively when needed. Run
-`sudo bash ~/jetson-codex/setup-autoupdates.sh` to configure separately,
+`bash ~/jetson-codex/install.sh` to configure separately,
 or pass `--skip-updates` to the installer. JetPack BSP upgrades,
 Docker image rebuilds, Codex binary upgrades and cloud storage updates
 are **not** automatically performed by this feature.
@@ -159,6 +159,37 @@ The health checker now parses `/root/.codex/config.toml` using Python
 `sandbox_mode="danger-full-access"`. It also checks the Codex executable,
 CUDA compiler and developer tools. These are static/runtime presence checks,
 not an end-to-end Codex agent command execution test.
+
+## One installer for everything
+
+`install.sh` now handles host bootstrap, NVIDIA runtime configuration,
+optional Ubuntu unattended security updates, persistent deployment and
+read-only health checks. The old standalone `healthcheck.sh`,
+`setup-nvidia-runtime.sh` and `setup-autoupdates.sh` were removed.
+
+Run under your existing account (preserves existing installations):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash
+```
+
+For a new, dedicated account, explicitly select:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --service-user
+```
+
+This creates `jetson-codex` if absent and grants it Docker group access.
+**Docker group access is root-equivalent**; this is a service identity, not
+a sandboxed security boundary. It does not migrate `dex`'s existing
+credentials or workspace. Avoid selecting this on an already-configured
+installation unless a separate account is intentional.
+
+Health checks without installation changes:
+
+```bash
+bash ~/jetson-codex/install.sh --check
+```
 
 ## One-command install or update
 
