@@ -81,6 +81,69 @@ the Jetson host filesystem, but the container uses host networking and
 passes through detected hardware devices. Only run trusted repositories
 and prompts with this setting.
 
+## Cloud-backed projects and repeatable health checks
+
+The installer can configure **OneDrive or Google Drive** as the persistent
+cloud root using `rclone config` OAuth. It asks once on an interactive
+terminal. Prerequisites on the Jetson host:
+
+```bash
+sudo apt install rclone fuse3
+```
+
+Cloud project files appear in the container at `/workspace/projects`.
+For example, selecting `OneDrive:/Codex` exposes:
+
+```text
+/workspace/projects/Smart-Home/    # Cloud-backed documents, scripts, outputs
+/workspace/projects/LOTFA/         # Cloud-backed documents, scripts, outputs
+/workspace/source/                 # Local NVMe Git working trees
+```
+
+**Files Codex creates under `/workspace/projects` are written through to
+the cloud** using rclone's VFS write-back cache. Files are fetched on demand.
+The cache is capped at 2 GiB for clean files, but pending uploads and active
+files may temporarily exceed that limit. Writes are asynchronous: wait for
+uploads to complete before powering off or deleting the local cache. This is
+not an atomic or transactional filesystem. Do not use it for Git repositories,
+databases, SQLite files or build directories.
+
+The host mount is managed by the user systemd service
+`jetson-codex-cloud.service`, with configuration at
+`~/.config/jetson-codex/storage.env`. For automatic startup before login,
+run `sudo loginctl enable-linger "$USER"` once. rclone OAuth credentials
+remain on the host in `~/.config/rclone/rclone.conf`; they are **not**
+mounted into the Codex container. Codex accesses the mounted files, not the
+OAuth tokens. Note that full-trust Codex can still modify or delete files
+in the selected cloud root, and those changes propagate.
+
+GitHub source lives under `/workspace/source/<project>` as a normal local
+Git checkout, and pushes to GitHub for durable storage. Generated scripts
+and documents that must live in OneDrive/Drive should be written under
+`/workspace/projects/<project>`. Native Google Docs/Sheets require their
+respective APIs for true editing.
+
+```bash
+# Reconfigure the cloud provider or folder
+bash ~/jetson-codex/configure-storage.sh --reconfigure
+
+# Reapply the mount service after changing configuration
+bash ~/jetson-codex/configure-storage.sh --mount
+
+# Check current system without rebuilding or restarting
+bash ~/jetson-codex/healthcheck.sh
+# Or via installer (read-only)
+bash ~/jetson-codex/install.sh --check
+
+# Force rebuild only when required
+bash ~/jetson-codex/install.sh --rebuild
+```
+
+Normal reruns reuse the existing image and running container. The health
+checker verifies JetPack, Docker, Codex login, GitHub login, cloud mount and
+remote reachability. The full SDK image and FUSE mount are **not yet tested
+on the actual Orin**.
+
 ## One-command install or update
 
 After starting the container, the installer checks `codex login status`. If already linked, it skips login. Otherwise, when run from an interactive terminal (including `curl ... | bash` over SSH), it launches `codex login --device-auth` automatically and displays the one-time code. Open **https://auth.openai.com/codex/device** on your laptop or phone to approve. If no terminal is available or login fails, the container stays running and the installer prints a retry command. GitHub CLI authentication remains a separate, optional step.
