@@ -11,92 +11,13 @@ DOCKERFILE=""
 CONTAINER="jetson-codex"
 MODE="hardware"
 BUILD=0
-FORCE_BUILD=0
-HEALTH_ONLY=0
-NO_BUILD=0
-SKIP_UPDATES=0
-SERVICE_USER=0
-CURRENT_USER=0
-INSTALL_ARGS=("$@")
+NEED_NVIDIA_RUNTIME=0
 
-say() { printf '[jetson-codex] %s\n' "$*"; }
-fail() { printf '[jetson-codex] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() {
-  cat <<'USAGE'
-Usage: install.sh [--service-user | --current-user] [--hardware | --gpu-only] [--rebuild] [--check]
+say() { printf '[jetson-codex] %s\\n' "$*"; }
+fail() { printf '[jetson-codex] ERROR: %s\\n' "$*" >&2; exit 1; }
 
-On a Jetson Orin, clone/update the public repo, build its ARM64 image,
-and start a named persistent container.
-
-  --service-user  Create/use dedicated jetson-codex account (opt-in).
-  --current-user  Install under the current user (default for existing installs).
-  --hardware    Default. Map the detected camera, I2C, GPIO and USB serial
-                device nodes and the CSI Argus socket if present, plus GPU.
-  --gpu-only    Use Docker Compose, with NVIDIA GPU but no extra device nodes.
-  --no-build    Require an existing image; do not build.
-  --rebuild     Force an image rebuild even when already present.
-  --check       Run read-only health checks without changing anything.
-  --skip-updates  Do not configure Ubuntu unattended security updates.
-  -h, --help    Show this help.
-
-Optional: JETSON_CODEX_DIR overrides ~/jetson-codex.
-
-Note: an existing 'jetson-codex' container may be recreated to deploy
-an updated image. The /workspace bind mount and authentication volumes
-are retained. Active processes inside the old container will stop.
-USAGE
-}
-
-while (( $# )); do
-  case "$1" in
-    --hardware) MODE="hardware" ;;
-    --gpu-only) MODE="compose" ;;
-    --no-build) NO_BUILD=1 ;;
-    --rebuild) FORCE_BUILD=1 ;;
-    --check) HEALTH_ONLY=1 ;;
-    --skip-updates) SKIP_UPDATES=1 ;;
-    --service-user) SERVICE_USER=1 ;;
-    --current-user) CURRENT_USER=1 ;;
-    -h|--help) usage; exit 0 ;;
-    *) fail "Unknown argument: $1 (use --help)" ;;
-  esac
-  shift
-done
-
-[[ $EUID -ne 0 ]] || fail "Run as a normal user, not sudo. The installer elevates only host setup steps."
-(( SERVICE_USER && CURRENT_USER )) && fail "Choose --service-user or --current-user, not both."
-if (( SERVICE_USER )) && [[ "${USER:-}" != "jetson-codex" ]]; then
-  command -v sudo >/dev/null || fail "sudo is required for dedicated account setup."
-  if ! id jetson-codex >/dev/null 2>&1; then
-    say "Creating dedicated jetson-codex account (no password login)."
-    sudo useradd --create-home --shell /bin/bash --user-group jetson-codex
-    sudo passwd -l jetson-codex >/dev/null
-  fi
-  # Docker group is root-equivalent. Explicit --service-user authorises it.
-  if ! id -nG jetson-codex | tr ' ' '\n' | grep -Fxq docker; then
-    say "Granting dedicated account Docker access (root-equivalent)."
-    sudo usermod -aG docker jetson-codex
-  fi
-  # Host-level changes must be completed by the invoking sudo-capable user.
-  if ! sudo docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
-    if ! command -v nvidia-ctk >/dev/null 2>&1; then
-      sudo apt-get update
-      sudo apt-get install -y nvidia-container-toolkit
-    fi
-    sudo nvidia-ctk runtime configure --runtime=docker
-    sudo systemctl restart docker
-  fi
-  if (( ! SKIP_UPDATES )); then
-    if ! grep -q 'APT::Periodic::Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null; then
-      sudo apt-get update
-      sudo apt-get install -y unattended-upgrades
-      printf '%s\n' 'APT::Periodic::Update-Package-Lists "1";' 'APT::Periodic::Unattended-Upgrade "1";' 'APT::Periodic::AutocleanInterval "7";' | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null
-      sudo systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
-    fi
-  fi
-  say "Continuing under dedicated account; OAuth and files belong to jetson-codex."
-  exec sudo -H -u jetson-codex bash -c 'curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --current-user --skip-updates' 
-fi
+(( $# == 0 )) || fail "No parameters supported. Run install.sh without arguments."
+[[ $EUID -ne 0 ]] || fail "Run as your normal account, not sudo."
 [[ "$(uname -s)" == "Linux" ]] || fail "Linux is required."
 [[ -f /etc/os-release ]] || fail "Cannot identify host OS."
 . /etc/os-release
@@ -117,41 +38,22 @@ case "$(uname -m)" in
   *) fail "This image is for a native ARM64 Jetson. Host architecture is $(uname -m)." ;;
 esac
 
-healthcheck() {
-  local failures=0
-  check() { if "$@" >/dev/null 2>&1; then say "OK: $*"; else say "FAIL: $*"; failures=$((failures+1)); fi; }
-  check docker info
-  check docker compose version
-  if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'; then say 'OK: NVIDIA runtime registered'; else say 'FAIL: NVIDIA runtime missing'; failures=$((failures+1)); fi
-  check docker container inspect jetson-codex
-  check docker exec jetson-codex codex --version
-  check docker exec jetson-codex codex login status
-  check docker exec jetson-codex python3 -c 'import pathlib,tomllib; c=tomllib.loads((pathlib.Path.home()/".codex/config.toml").read_text()); assert c.get("approval_policy")=="never" and c.get("sandbox_mode")=="danger-full-access"'
-  check docker exec jetson-codex gh --version
-  if [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
-    source "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env"
-    check mountpoint -q "$RCLONE_MOUNT"
-    check timeout 20 rclone lsf "$RCLONE_SOURCE" --max-depth 1
-  fi
-  if [[ -f /etc/apt/apt.conf.d/20auto-upgrades ]] && grep -q 'APT::Periodic::Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades; then
-    say "OK: unattended security updates configured"
-  else
-    say "WARN: unattended security updates not configured"
-  fi
-  (( failures == 0 )) || fail "$failures health checks failed."
-  say "All required health checks passed."
-}
-if (( HEALTH_ONLY )); then healthcheck; exit 0; fi
-
 for bin in git docker; do
   command -v "$bin" >/dev/null 2>&1 || fail "Missing prerequisite: $bin"
 done
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required (docker compose)."
 if ! docker info >/dev/null 2>&1; then
-  if ! id -nG "$USER" | tr ' ' '\n' | grep -Fxq docker; then
-    fail "User $USER lacks Docker access. Run: sudo usermod -aG docker $USER ; then reconnect SSH. Or run installer with --service-user."
+  if ! sudo docker info >/dev/null 2>&1; then
+    fail "Docker daemon unavailable, including via sudo. Check Docker service."
   fi
-  fail "Docker unavailable in this session. Reconnect SSH after group changes; check systemctl status docker."
+  if ! id -nG "$USER" | tr ' ' '\n' | grep -Fxq docker; then
+    say "Granting $USER Docker access (root-equivalent)."
+    sudo usermod -aG docker "$USER"
+  fi
+  say "Activating Docker group for this install without requiring a new SSH session."
+  [[ "${JETSON_CODEX_GROUP_REEXEC:-}" != "1" ]] || fail "Docker group activation failed."
+  export JETSON_CODEX_GROUP_REEXEC=1
+  exec sg docker -c 'curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash'
 fi
 if ! docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
   say "NVIDIA Docker runtime missing. Installing/configuring automatically."
@@ -190,7 +92,7 @@ if (( NEED_NVIDIA_RUNTIME )); then
   sudo systemctl restart docker
   docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"' || fail "NVIDIA runtime still missing."
 fi
-if (( ! SKIP_UPDATES )); then
+if true; then
   if [[ -f /etc/apt/apt.conf.d/20auto-upgrades ]] && grep -q 'APT::Periodic::Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades; then
     say "Ubuntu unattended security updates already configured."
   else
@@ -216,10 +118,7 @@ fi
 if [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
   bash ./configure-storage.sh --mount || say "Cloud mount unavailable; health check will report this."
 fi
-if (( FORCE_BUILD && NO_BUILD )); then fail "Cannot combine --rebuild and --no-build"; fi
-if (( FORCE_BUILD )); then BUILD=1; fi
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  (( NO_BUILD )) && fail "--no-build requested but image $IMAGE does not exist."
   BUILD=1
 fi
 if (( BUILD )); then
@@ -306,7 +205,7 @@ else
 fi
 
 say "Running health checks"
-healthcheck || say "Health checks reported issues; see output above."
+bash ./verify-host.sh || say "Health checks reported issues; see output above."
 
 cat <<'DONE'
 
