@@ -205,7 +205,13 @@ else
 fi
 
 say "Running health checks"
-bash ./verify-host.sh || say "Health checks reported issues; see output above."
+if docker exec "$CONTAINER" codex --version >/dev/null 2>&1 \
+  && docker exec "$CONTAINER" python3 -c 'import pathlib,tomllib; c=tomllib.loads((pathlib.Path.home()/".codex/config.toml").read_text()); assert c.get("approval_policy")=="never" and c.get("sandbox_mode")=="danger-full-access"' \
+  && docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
+  say "Health OK: Codex executable, full trust and NVIDIA runtime."
+else
+  fail "Post-install health check failed."
+fi
 
 cat <<'DONE'
 
