@@ -9,6 +9,9 @@ fi
 args=(run -d --name jetson-codex --restart unless-stopped --runtime=nvidia --network=host --init
       --shm-size=1g -v "${PWD}/workspace:/workspace" -v jetson-codex-auth:/root/.codex
       -v jetson-github-auth:/root/.config/gh -v jetson-git-config:/root/.config/git
+      -v jetson-codex-git-ssh:/root/.ssh
+      -v jetson-codex-gitlab-auth:/root/.config/glab-cli
+      -v jetson-codex-azure-auth:/root/.azure
       -v "$HOME/jetson-codex-cloud:/workspace/projects:rslave" \
       -v "${PWD}/workspace/source:/workspace/source" \
       -w /workspace -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all
