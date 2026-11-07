@@ -28,10 +28,14 @@ Usage: install.sh [--service-user | --current-user] [--hardware | --gpu-only] [-
 On a Jetson Orin, clone/update the public repo, build its ARM64 image,
 and start a named persistent container.
 
-  --service-user  Create/use dedicated jetson-codex account (opt-in).\n  --current-user  Install under the current user (default for existing installs).\n  --hardware    Default. Map the detected camera, I2C, GPIO and USB serial
+  --service-user  Create/use dedicated jetson-codex account (opt-in).
+  --current-user  Install under the current user (default for existing installs).
+  --hardware    Default. Map the detected camera, I2C, GPIO and USB serial
                 device nodes and the CSI Argus socket if present, plus GPU.
   --gpu-only    Use Docker Compose, with NVIDIA GPU but no extra device nodes.
-  --no-build    Require an existing image; do not build.\n  --rebuild     Force an image rebuild even when already present.\n  --check       Run read-only health checks without changing anything.
+  --no-build    Require an existing image; do not build.
+  --rebuild     Force an image rebuild even when already present.
+  --check       Run read-only health checks without changing anything.
   --skip-updates  Do not configure Ubuntu unattended security updates.
   -h, --help    Show this help.
 
@@ -73,8 +77,25 @@ if (( SERVICE_USER )) && [[ "${USER:-}" != "jetson-codex" ]]; then
     say "Granting dedicated account Docker access (root-equivalent)."
     sudo usermod -aG docker jetson-codex
   fi
+  # Host-level changes must be completed by the invoking sudo-capable user.
+  if ! sudo docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
+    if ! command -v nvidia-ctk >/dev/null 2>&1; then
+      sudo apt-get update
+      sudo apt-get install -y nvidia-container-toolkit
+    fi
+    sudo nvidia-ctk runtime configure --runtime=docker
+    sudo systemctl restart docker
+  fi
+  if (( ! SKIP_UPDATES )); then
+    if ! grep -q 'APT::Periodic::Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null; then
+      sudo apt-get update
+      sudo apt-get install -y unattended-upgrades
+      printf '%s\n' 'APT::Periodic::Update-Package-Lists "1";' 'APT::Periodic::Unattended-Upgrade "1";' 'APT::Periodic::AutocleanInterval "7";' | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null
+      sudo systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
+    fi
+  fi
   say "Continuing under dedicated account; OAuth and files belong to jetson-codex."
-  exec sudo -H -u jetson-codex bash -c 'curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --current-user' 
+  exec sudo -H -u jetson-codex bash -c 'curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --current-user --skip-updates' 
 fi
 [[ "$(uname -s)" == "Linux" ]] || fail "Linux is required."
 [[ -f /etc/os-release ]] || fail "Cannot identify host OS."
