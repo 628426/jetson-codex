@@ -49,9 +49,12 @@ EOF
   fi
 }
 if [[ "${1:-}" == "--mount" ]]; then install_mount; exit 0; fi
-if ! command -v rclone >/dev/null 2>&1; then
-  say "rclone missing. Install with: sudo apt install rclone fuse3"
-  exit 2
+if ! command -v rclone >/dev/null 2>&1 || ! command -v fusermount3 >/dev/null 2>&1; then
+  say "Installing rclone and FUSE3 using Ubuntu APT."
+  sudo apt-get update
+  sudo apt-get install -y rclone fuse3
+  command -v rclone >/dev/null 2>&1 || fail "rclone installation failed"
+  command -v fusermount3 >/dev/null 2>&1 || fail "FUSE3 installation failed"
 fi
 if [[ -f "$ENV_FILE" && "${1:-}" != "--reconfigure" ]]; then
   say "Existing storage configuration found. Use --reconfigure to change it."
