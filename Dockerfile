@@ -207,21 +207,57 @@ RUN if [[ "${INSTALL_PHP}" == "1" ]]; then \
       rm /tmp/composer-setup.php; \
     fi
 
-# Swift is officially available for Ubuntu 22.04/aarch64, though OpenAI's
-# prebuilt codex-universal ARM64 image excludes it. Switch it off only if
-# your Jetson cannot successfully install these toolchains.
+# Swift toolchains are large on ARM64. Keep all requested versions, but
+# cache each independently and never let swiftly init download an
+# *additional* latest toolchain before the pinned versions are installed.
+# Swift 5.10.1, 6.1.x, and 6.2.x have Ubuntu 24.04 aarch64 distributions.
 ARG INSTALL_SWIFT=1
-ARG SWIFT_VERSIONS="5.10 6.1 6.2"
+ARG SWIFT_VERSION_1=5.10
+ARG SWIFT_VERSION_2=6.1
+ARG SWIFT_VERSION_3=6.2
 RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
       curl -fLSs https://download.swift.org/swiftly/linux/swiftly-aarch64.tar.gz \
         -o /tmp/swiftly.tar.gz; \
       mkdir -p /tmp/swiftly-extract; \
       tar -xzf /tmp/swiftly.tar.gz -C /tmp/swiftly-extract; \
-      /tmp/swiftly-extract/swiftly init --quiet-shell-followup; \
-      source "${SWIFTLY_HOME_DIR}/env.sh"; \
-      for v in ${SWIFT_VERSIONS}; do swiftly install "${v}"; done; \
-      swiftly use 6.2; \
+      /tmp/swiftly-extract/swiftly init --assume-yes --skip-install --quiet-shell-followup; \
+      test -f "${SWIFTLY_HOME_DIR}/env.sh"; \
       rm -rf /tmp/swiftly.tar.gz /tmp/swiftly-extract; \
+    fi
+# Print storage diagnostics before any multi-GB extraction. This checks
+# Docker's writable filesystem, not a space estimate for the host root.
+# 6 GiB is conservative headroom to avoid opaque "Write failed" errors.
+RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
+      source "${SWIFTLY_HOME_DIR}/env.sh"; \
+      echo "Installing Swift ${SWIFT_VERSION_1} (version 1/3)"; \
+      df -h /tmp "${SWIFTLY_HOME_DIR}"; df -i /tmp "${SWIFTLY_HOME_DIR}"; \
+      available_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"; \
+      if (( available_kb < 6291456 )); then \
+        echo "ERROR: Under 6 GiB free in Docker; Swift extraction needs more headroom." >&2; exit 1; \
+      fi; \
+      swiftly install "${SWIFT_VERSION_1}" --verbose; \
+    fi
+RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
+      source "${SWIFTLY_HOME_DIR}/env.sh"; \
+      echo "Installing Swift ${SWIFT_VERSION_2} (version 2/3)"; \
+      df -h /tmp "${SWIFTLY_HOME_DIR}"; df -i /tmp "${SWIFTLY_HOME_DIR}"; \
+      available_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"; \
+      if (( available_kb < 6291456 )); then \
+        echo "ERROR: Under 6 GiB free in Docker; Swift extraction needs more headroom." >&2; exit 1; \
+      fi; \
+      swiftly install "${SWIFT_VERSION_2}" --verbose; \
+    fi
+RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
+      source "${SWIFTLY_HOME_DIR}/env.sh"; \
+      echo "Installing Swift ${SWIFT_VERSION_3} (version 3/3)"; \
+      df -h /tmp "${SWIFTLY_HOME_DIR}"; df -i /tmp "${SWIFTLY_HOME_DIR}"; \
+      available_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"; \
+      if (( available_kb < 6291456 )); then \
+        echo "ERROR: Under 6 GiB free in Docker; Swift extraction needs more headroom." >&2; exit 1; \
+      fi; \
+      swiftly install "${SWIFT_VERSION_3}" --verbose; \
+      swiftly use "${SWIFT_VERSION_3}"; \
+      swift --version; \
     fi
 
 # Native-device utilities are installed; device access is granted at runtime.
