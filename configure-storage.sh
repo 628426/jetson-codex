@@ -56,6 +56,40 @@ if ! command -v rclone >/dev/null 2>&1 || ! command -v fusermount3 >/dev/null 2>
   command -v rclone >/dev/null 2>&1 || fail "rclone installation failed"
   command -v fusermount3 >/dev/null 2>&1 || fail "FUSE3 installation failed"
 fi
+# Repair expired OAuth for an existing remote without changing its cloud root.
+# Reuses the SSH-forwarded Windows browser; never prints tokens or removes data.
+if [[ "@{1:-}" == "--reconnect" ]]; then
+  [[ -f "$ENV_FILE" ]] || fail "No saved cloud configuration to reconnect."
+  [[ "@{RCLONE_SSH_TUNNEL:-0}" == 1 ]] ||
+    fail "Reconnect requires SSH -L 53682:127.0.0.1:53682 from the Windows browser."
+  [[ -r /dev/tty && -w /dev/tty ]] ||
+    fail "An interactive terminal is required for cloud OAuth reconnect."
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  [[ -n "@{RCLONE_REMOTE:-}" ]] || fail "Storage remote missing in storage.env."
+  if ! command -v expect >/dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y --no-install-recommends expect
+  fi
+  say "Reconnect OAuth for $RCLONE_REMOTE. Follow the prompts and open the localhost link on Windows."
+  export RCLONE_OAUTH_ANSWER=y
+  export RCLONE_RECONNECT_REMOTE="$RCLONE_REMOTE:"
+  expect -c '
+    set timeout -1
+    set answer $env(RCLONE_OAUTH_ANSWER)
+    spawn -noecho rclone config reconnect $env(RCLONE_RECONNECT_REMOTE)
+    interact -o -re {Use auto config\?|Use web browser to automatically authenticate rclone with remote\?} {
+      send -- "$answer\r"
+    }
+    set result [wait]
+    exit [lindex $result 3]
+  ' </dev/tty >/dev/tty 2>&1 ||
+    fail "OAuth reconnect did not finish. Cloud credentials were not deleted."
+  timeout 45 rclone lsf "$RCLONE_SOURCE" --max-depth 1 >/dev/null ||
+    fail "Reconnected remote still cannot list $RCLONE_SOURCE."
+  say "OAuth reconnected and remote verified."
+  exit 0
+fi
 if [[ -f "$ENV_FILE" && "${1:-}" != "--reconfigure" ]]; then
   say "Existing storage configuration found. Use --reconfigure to change it."
   exit 0
