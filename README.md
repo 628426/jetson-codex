@@ -31,6 +31,57 @@ without new cloud authorisation:
 curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash
 ```
 
+## Hardware-accelerated TensorRT and DeepStream: non-negotiable
+
+This is a **single headless development container**, not a lightweight Codex
+front-end with an optional second NVIDIA image. It must support CUDA C/C++,
+TensorRT engine building and GPU inference, DeepStream pipelines, GStreamer
+`nvinfer`, NVDEC, cameras/RTSP, VPI and Jetson I/O.
+
+**Why keep the large `9.1-triton-multiarch` base for now?**
+NVIDIA's smaller Jetson `9.1-samples-multiarch` image contains the
+DeepStream/TensorRT *runtime*, but is documented as **deployment-only**.
+The Triton-tagged image also includes extra NVIDIA development libraries.
+Triton **Inference Server** itself is not required for `nvinfer` TensorRT
+pipelines; the tag is retained for development capability, not for serving
+Triton models. Replacing it with a smaller custom SDK image is a future
+optimisation, not something to do by silently losing DeepStream features.
+
+Your Jetson host already has CUDA 13.2, TensorRT 10.16, cuDNN 9 and VPI 4.1.
+The NVIDIA runtime exposes host GPU drivers and device nodes. It does **not**
+automatically provide the container with the full CUDA, cuDNN, TensorRT or
+DeepStream development environments. We deliberately **do not bind-mount
+host library directories over the image's libraries**, which would create
+an unsupported and potentially incompatible mix. CUDA/TensorRT components
+are supplied by the DeepStream image, while driver access is supplied by
+the host. No extra toolchains are installed on the host.
+
+After the first successful image build and container startup, the installer
+now checks:
+
+- CUDA driver device access and host/container GPU counts.
+- Real H.264/H.265 decoding via the Jetson `nvv4l2decoder`.
+- Actual headless `nvvideoconvert` conversion into NVIDIA NVMM memory;
+  DeepStream `nvinfer`, `nvstreammux`, `nvtracker` and decoder plugins.
+- A small C++ **TensorRT 10 engine build and real CUDA GPU inference**,
+  checking that `3.25 + 3.25 = 6.5` through `enqueueV3`.
+
+Re-run each acceptance test independently from the Jetson host:
+
+```bash
+docker exec jetson-codex bash /opt/jetson-codex/hardware-check.sh --deepstream
+docker exec jetson-codex bash /opt/jetson-codex/hardware-check.sh --tensorrt
+docker exec jetson-codex bash /opt/jetson-codex/hardware-check.sh --video
+```
+
+The bundled GStreamer pipeline proves NVMM conversion and plugin loading,
+**not** that a user-selected DeepStream model has performed `nvinfer`
+inference. Test your specific model/config and RTSP camera afterwards.
+The TensorRT smoke test does build an engine and execute an inference.
+NVIDIA officially labels Jetson DeepStream containers deployment-oriented;
+building custom DeepStream plugins may still require additional SDK source
+and headers. Full hardware results have not yet been confirmed on `dexson`.
+
 ## NVIDIA SDK: DeepStream, TensorRT, cuDNN and VPI
 
 The JetPack 7.2.0 Dockerfile starts from NVIDIA's **official Jetson DeepStream 9.1 Triton image**:
