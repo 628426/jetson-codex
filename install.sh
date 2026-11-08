@@ -305,6 +305,20 @@ if ! docker ps --filter "name=^/$CONTAINER$" --format '{{.Names}}' | grep -Fxq "
   fail "$CONTAINER is not running; inspect 'docker logs $CONTAINER'."
 fi
 
+# Prune the BuildKit cache only AFTER a successful image build and startup.
+# This clears the selected Docker builder's cache, including cache shared
+# with OTHER projects, but deliberately preserves all images, containers,
+# named volumes and their data. No prune on an unchanged-image rerun.
+if (( BUILD )); then
+  say "Built image is running. Reclaiming Docker build cache (images and volumes preserved)."
+  if docker buildx prune --all --force; then
+    say "Docker build cache cleanup completed."
+    docker system df || true
+  else
+    say "WARNING: Docker build cache cleanup failed. Image and container are still running."
+  fi
+fi
+
 # Verify NVIDIA devices and execute a real NVDEC decode on every rerun.
 hardware_health
 
