@@ -121,7 +121,6 @@ tensorrt() {
   [[ -f /opt/jetson-codex/tensorrt-smoke.cpp ]] ||
     { echo 'TensorRT smoke source is missing' >&2; return 1; }
   tmp="$(mktemp -d /tmp/jetson-trt-XXXXXX)"
-  trap 'rm -rf "$tmp"' RETURN
   printf '[TensorRT] Compiling TensorRT 10 CUDA test: '
   if ! timeout 90 g++ -std=c++17 -O2 \
       -I/usr/local/cuda/include -L/usr/local/cuda/lib64 \
@@ -130,13 +129,15 @@ tensorrt() {
       >"$tmp/compile.log" 2>&1; then
     echo FAIL
     tail -n 25 "$tmp/compile.log" >&2
+    rm -rf "$tmp"
     return 1
   fi
   echo OK
   printf '[TensorRT] Building engine and running real GPU inference: '
-  if timeout 180 "$tmp/tensorrt-smoke"; then
-    return 0
-  fi
+  local result=0
+  timeout 180 "$tmp/tensorrt-smoke" || result=$?
+  rm -rf "$tmp"
+  if (( result == 0 )); then return 0; fi
   echo FAIL
   return 1
 }
