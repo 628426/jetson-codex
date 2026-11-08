@@ -335,6 +335,30 @@ allowance** for image layers and toolchain extraction, and warns below
 estimate, not a guarantee of sufficient space. The warning is advisory;
 it does not abort or prune images or volumes.
 
+## Automatic Docker build-cache cleanup
+
+Once `install.sh` has **successfully built the image and started the
+persistent `jetson-codex` container**, it immediately runs:
+
+```bash
+docker buildx prune --all --force
+```
+
+This frees unused BuildKit build cache on the selected builder and then
+prints `docker system df`. **It never prunes Docker images, containers,
+named volumes or their data.** Existing Codex/GitHub/GitLab/Azure credentials
+and project files are preserved.
+
+The command prunes **all build cache on the selected Docker builder**,
+including cache created by other projects on the same builder. Future
+rebuilds may need to download/recompile toolchains again. Cleanup runs
+only after a successful *new* image build and container startup; it
+doesn't run on ordinary no-op installer reruns. A cleanup failure reports
+a warning but does not stop the running container.
+
+This does not shrink the finished image itself. Free space reclaimed depends
+on which cached layers Docker can safely delete.
+
 ## One-command install or update
 
 After starting the container, the installer checks `codex login status`. If already linked, it skips login. Otherwise, when run from an interactive terminal (including `curl ... | bash` over SSH), it launches `codex login --device-auth` automatically and displays the one-time code. Open **https://auth.openai.com/codex/device** on your laptop or phone to approve. If no terminal is available or login fails, the container stays running and the installer prints a retry command. GitHub CLI authentication remains a separate, optional step.
