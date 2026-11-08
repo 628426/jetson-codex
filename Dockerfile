@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# One ARM64 environment: native NVIDIA JetPack libraries + Codex Universal's toolchain inventory.
+# Lean ARM64 Codex environment: NVIDIA AI/video SDK + C/C++, Python 3.12, Node LTS.
 # Target host: Jetson Orin, JetPack 7.2 / L4T 39.2.
 # NOT a rebuild of OpenAI's official image; this is an independently maintained port.
 ARG JETPACK_IMAGE=nvcr.io/nvidia/deepstream:9.1-triton-multiarch
@@ -14,36 +14,28 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIPX_BIN_DIR=/usr/local/bin \
     PIPX_HOME=/opt/pipx \
     MISE_TRUSTED_CONFIG_PATHS=/root/.config/mise \
-    CARGO_HOME=/root/.cargo \
-    RUSTUP_HOME=/root/.rustup \
-    PHPENV_ROOT=/root/.phpenv \
-    SWIFTLY_HOME_DIR=/root/.local/share/swiftly \
     UV_NO_PROGRESS=1
-ENV PATH="/root/.phpenv/shims:/root/.phpenv/bin:/root/.local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.swiftly/bin:/usr/local/cuda/bin:${PATH}"
+ENV PATH="/root/.local/share/mise/shims:/root/.local/bin:/usr/local/cuda/bin:${PATH}"
 
 # Noble (Ubuntu 24.04) packages. Official Jetson DeepStream 9.1 Triton image
 # supplies CUDA 13.2, TensorRT, cuDNN, GStreamer plugins and DeepStream runtime.
 # NVIDIA documents Jetson DeepStream containers as deployment-oriented: verify
 # native SDK headers separately. VPI is installed explicitly below.
 # Never upgrade the host BSP from inside a container.
+# Minimal host-independent development utilities for CUDA, C/C++, Python and
+# video/camera work. Do NOT install unused language build dependencies here.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    autoconf automake bash-completion binutils bison build-essential \
-    ca-certificates ccache clang clang-format clang-tidy cmake curl \
-    default-libmysqlclient-dev dnsutils fd-find ffmpeg file gawk gdb \
-    gettext git git-lfs gnupg gpg gstreamer1.0-tools \
-    gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    bash-completion build-essential ca-certificates \
+    clang clang-format clang-tidy cmake curl \
+    dnsutils fd-find ffmpeg file gdb git git-lfs gnupg gpg \
+    gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
     i2c-tools inotify-tools iputils-ping jq libatomic1 \
-    libbz2-dev libcurl4-openssl-dev libdb-dev libedit-dev libffi-dev \
-    libgd-dev libgdbm-compat-dev libgdbm-dev libgmp-dev libicu-dev \
-    libjpeg-dev liblzma-dev libncurses-dev libnss3-dev libonig-dev \
-    libpng-dev libpq-dev libreadline-dev libsqlite3-dev libssl-dev \
-    libtidy-dev libunwind-dev libxml2-dev libxslt1-dev libyaml-dev \
-    libzip-dev libz3-dev lsb-release make moreutils nasm netcat-openbsd \
-    ninja-build openssh-client patch perl pipx pkg-config procps \
-    protobuf-compiler python3-dev python3-pip python3-venv re2c rsync \
-    software-properties-common sqlite3 sudo swig tk-dev tmux \
-    tzdata universal-ctags unixodbc-dev unzip usbutils uuid-dev \
-    v4l-utils wget xz-utils yasm zip zlib1g-dev \
+    libcurl4-openssl-dev libffi-dev libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev libjpeg-dev libpng-dev libssl-dev \
+    libv4l-dev make ninja-build openssh-client patch pipx pkg-config \
+    procps protobuf-compiler python3-dev python3-pip python3-venv \
+    ripgrep rsync sqlite3 sudo swig tmux tzdata unzip usbutils \
+    v4l-utils wget xz-utils zip zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # VPI is a separate JetPack SDK component. Require the NVIDIA VPI 4 packages;
@@ -108,25 +100,28 @@ RUN mkdir -p "${AZURE_EXTENSION_DIR}" \
     && az extension add --name azure-devops --yes \
     && az extension show --name azure-devops --query name -o tsv
 
-# Exactly one current stable Python runtime; Ubuntu's system Python remains for APT/az.
-ARG PYTHON_VERSION=3.15.2
-RUN mise install "python@${PYTHON_VERSION}" \
-    && mise use --global "python@${PYTHON_VERSION}" \
-    && mise exec "python@${PYTHON_VERSION}" -- python -m ensurepip --upgrade \
-    && mise exec "python@${PYTHON_VERSION}" -- python -m pip install --no-cache-dir \
-       ruff black mypy pyright isort pytest
-RUN pipx install poetry && pipx install uv && pipx install cpplint \
-    && pipx install cmakelang
+# Use Ubuntu 24.04's system Python 3.12. NVIDIA/DeepStream Python wheels may
+# rely on the distro ABI; no separate mise Python toolchains are installed.
+# uv can install project-local dependencies on demand without bloating this image.
+RUN python3 -c 'import sys; assert sys.version_info[:2] == (3,12), sys.version' \
+    && pipx install uv \
+    && pipx install ruff \
+    && uv --version \
+    && ruff --version
 
-# One latest stable LTS Node.js; v27 remains pre-release as of Nov 2026.
+# One Node.js LTS runtime for front-end and full-stack work. Codex is a
+# standalone ARM64 binary and does not require Node or Rust to execute.
 ARG NODE_VERSION=26.11.0
-RUN mise install "node@${NODE_VERSION}" \
-    && mise use --global "node@${NODE_VERSION}" \
-    && mise exec "node@${NODE_VERSION}" -- npm install --global \
-       typescript eslint prettier pnpm yarn@1.22.22
+RUN mise install "node${NODE_VERSION}" \
+    && mise use --global "node${NODE_VERSION}" \
+    && mise exec "node${NODE_VERSION}" -- npm install --global \
+       typescript eslint prettier pnpm \
+    && mise exec "node${NODE_VERSION}" -- npm cache clean --force \
+    && node --version \
+    && npm --version \
+    && pnpm --version
 
-# Install Codex as an actual standalone native ARM64 executable.
-# This remains callable even after changing the default Node version.
+# Standalone native ARM64 Codex executable (not an npm or Rust build).
 ARG CODEX_RELEASE=latest
 RUN curl -fLSs "https://github.com/openai/codex/releases/${CODEX_RELEASE}/download/codex-aarch64-unknown-linux-musl.tar.gz" \
       -o /tmp/codex.tar.gz \
@@ -136,112 +131,12 @@ RUN curl -fLSs "https://github.com/openai/codex/releases/${CODEX_RELEASE}/downlo
     && rm /tmp/codex.tar.gz \
     && codex --version
 
-# Bun, as used by Codex Universal.
-ARG BUN_VERSION=1.4.4
-RUN mise install "bun@${BUN_VERSION}" && mise use --global "bun@${BUN_VERSION}"
-
-# Exactly one current JDK. Gradle and Maven each installed once.
-ARG JAVA_VERSION=27
-ARG GRADLE_VERSION=9.9.0
-ARG MAVEN_VERSION=3.10.0
-RUN mise install "java@${JAVA_VERSION}" \
-    && mise use --global "java@${JAVA_VERSION}" \
-    && mise install "gradle@${GRADLE_VERSION}" "maven@${MAVEN_VERSION}" \
-    && mise use --global "gradle@${GRADLE_VERSION}" "maven@${MAVEN_VERSION}"
-
-# Exactly one stable Rust toolchain with rustfmt and Clippy.
-ARG RUST_VERSION=1.99.1
-RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
-      | sh -s -- -y --profile minimal --default-toolchain none \
-    && rustup toolchain install "${RUST_VERSION}" --profile minimal \
-       --component rustfmt --component clippy \
-    && rustup default "${RUST_VERSION}"
-
-# Exactly one current Go toolchain and one compatible linter.
-ARG GO_VERSION=1.27.3
-ARG GOLANGCI_LINT_VERSION=2.15.0
-RUN mise install "go@${GO_VERSION}" \
-    && mise use --global "go@${GO_VERSION}" \
-    && mise install "golangci-lint@${GOLANGCI_LINT_VERSION}" \
-    && mise use --global "golangci-lint@${GOLANGCI_LINT_VERSION}"
-
-# One current Ruby, Erlang/OTP and matching Elixir toolchain.
-ARG RUBY_VERSION=4.0.9
-RUN mise install "ruby@${RUBY_VERSION}" \
-    && mise use --global "ruby@${RUBY_VERSION}"
-ENV KERL_CONFIGURE_OPTIONS="--without-wx --without-javac"
-ARG ERLANG_VERSION=29.1.2
-ARG ELIXIR_VERSION=1.20.5-otp-29
-RUN mise install "erlang@${ERLANG_VERSION}" \
-    && mise use --global "erlang@${ERLANG_VERSION}" \
-    && mise exec "erlang@${ERLANG_VERSION}" -- erl -noshell -eval 'halt().'
-RUN mise exec "erlang@${ERLANG_VERSION}" -- mise install "elixir@${ELIXIR_VERSION}" \
-    && mise use --global "elixir@${ELIXIR_VERSION}" \
-    && mise exec "erlang@${ERLANG_VERSION}" -- elixir --version
-
-# Bazelisk / bazel. See upstream's pinned version and release naming.
-ARG BAZELISK_VERSION=v1.30.0
-RUN curl -fLSs \
-      "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-arm64" \
-      -o /usr/local/bin/bazelisk \
-    && chmod 0755 /usr/local/bin/bazelisk \
-    && ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
-
-# One current *stable* PHP release, not four rolling source snapshots.
-ARG INSTALL_PHP=1
-ARG PHP_VERSION=8.5.12
-RUN if [[ "${INSTALL_PHP}" == "1" ]]; then \
-      git clone --depth 1 https://github.com/phpenv/phpenv.git "${PHPENV_ROOT}"; \
-      git clone --depth 1 https://github.com/php-build/php-build.git \
-        "${PHPENV_ROOT}/plugins/php-build"; \
-      MAKEFLAGS=-j2 phpenv install -s "${PHP_VERSION}"; \
-      phpenv rehash; phpenv global "${PHP_VERSION}"; \
-      curl -fLSs https://getcomposer.org/installer -o /tmp/composer-setup.php; \
-      php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer; \
-      rm /tmp/composer-setup.php; \
-    fi
-
-# One current stable Swift toolchain for Ubuntu 24.04 / aarch64.
-# Do not let swiftly init download a second default version.
-ARG INSTALL_SWIFT=1
-ARG SWIFT_VERSION=6.4.2
-RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
-      curl -fLSs https://download.swift.org/swiftly/linux/swiftly-aarch64.tar.gz \
-        -o /tmp/swiftly.tar.gz; \
-      mkdir -p /tmp/swiftly-extract; \
-      tar -xzf /tmp/swiftly.tar.gz -C /tmp/swiftly-extract; \
-      /tmp/swiftly-extract/swiftly init --assume-yes --skip-install --quiet-shell-followup; \
-      test -f "${SWIFTLY_HOME_DIR}/env.sh"; \
-      rm -rf /tmp/swiftly.tar.gz /tmp/swiftly-extract; \
-    fi
-# Swiftly checks the Debian package name gnupg2, not just availability of
-# the gpg binary from gnupg. Install inside the image before extracting Swift.
-# Keep this after the cached swiftly bootstrap layer so earlier layers survive.
-RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
-      apt-get update \
-      && apt-get install -y --no-install-recommends gnupg2 \
-      && dpkg-query -W -f='${Status}\n' gnupg2 | grep -Fx 'install ok installed' \
-      && rm -rf /var/lib/apt/lists/*; \
-    fi
-RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
-      source "${SWIFTLY_HOME_DIR}/env.sh"; \
-      echo "Installing one Swift toolchain: ${SWIFT_VERSION}"; \
-      df -h /tmp "${SWIFTLY_HOME_DIR}"; df -i /tmp "${SWIFTLY_HOME_DIR}"; \
-      available_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"; \
-      if (( available_kb < 6291456 )); then \
-        echo "ERROR: Under 6 GiB free for Swift extraction." >&2; exit 1; \
-      fi; \
-      swiftly install "${SWIFT_VERSION}"; \
-      swiftly use "${SWIFT_VERSION}"; \
-      swift --version; \
-    fi
-
 # Native-device utilities are installed; device access is granted at runtime.
 COPY setup-versions.sh verify.sh entrypoint.sh configure-full-trust.py codex-connect.sh hardware-check.sh /opt/jetson-codex/
 RUN chmod 0755 /opt/jetson-codex/*.sh \
     && ln -sf /opt/jetson-codex/codex-connect.sh /usr/local/bin/codex-connect \
     && mkdir -p /workspace /root/.codex \
-    && printf '\n# Jetson Codex development tools\nexport PATH="/root/.phpenv/shims:/root/.phpenv/bin:/root/.local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.swiftly/bin:/usr/local/cuda/bin:$PATH"\n' >> /root/.bashrc
+    && printf '\n# Jetson Codex development tools\nexport PATH="/root/.local/share/mise/shims:/root/.local/bin:/usr/local/cuda/bin:$PATH"\n' >> /root/.bashrc
 # Build fingerprint is injected by install.sh and added only at the end so
 # documentation changes do not invalidate expensive language toolchain layers.
 ARG JETSON_CODEX_BUILD_HASH=untracked
