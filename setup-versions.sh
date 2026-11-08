@@ -1,22 +1,17 @@
 #!/usr/bin/env bash
+# Single-version toolchain image: all language defaults are pinned at build time.
+# Never install/download a second compiler version when a container starts.
 set -euo pipefail
-# Compatible selectors, modelled on OpenAI codex-universal's CODEX_ENV_* scheme.
-# This operates on already-installed toolchains; it doesn't download at startup.
-use_mise() {
-  local key="$1" package="$2"
-  if [[ -n "${!key:-}" ]]; then
-    mise use --global "${package}@${!key}"
+selectors=(
+  CODEX_ENV_PYTHON_VERSION CODEX_ENV_NODE_VERSION
+  CODEX_ENV_RUBY_VERSION CODEX_ENV_RUST_VERSION
+  CODEX_ENV_GO_VERSION CODEX_ENV_JAVA_VERSION
+  CODEX_ENV_PHP_VERSION CODEX_ENV_SWIFT_VERSION
+)
+for variable in "${selectors[@]}"; do
+  if [[ -n "${!variable:-}" ]]; then
+    printf 'Unsupported runtime override %s=%s: jetson-codex is a single-version image. Remove the override or rebuild for a different version.\n' \
+      "$variable" "${!variable}" >&2
+    exit 2
   fi
-}
-use_mise CODEX_ENV_PYTHON_VERSION python
-use_mise CODEX_ENV_NODE_VERSION node
-use_mise CODEX_ENV_RUBY_VERSION ruby
-use_mise CODEX_ENV_GO_VERSION go
-use_mise CODEX_ENV_JAVA_VERSION java
-if [[ -n "${CODEX_ENV_RUST_VERSION:-}" ]]; then rustup default "${CODEX_ENV_RUST_VERSION}"; fi
-if [[ -n "${CODEX_ENV_PHP_VERSION:-}" ]]; then phpenv global "${CODEX_ENV_PHP_VERSION}snapshot"; fi
-if [[ -n "${CODEX_ENV_SWIFT_VERSION:-}" ]]; then
-  [[ -f "${SWIFTLY_HOME_DIR:-/root/.local/share/swiftly}/env.sh" ]] || { echo 'Swift was not installed' >&2; exit 1; }
-  source "${SWIFTLY_HOME_DIR:-/root/.local/share/swiftly}/env.sh"
-  swiftly use "${CODEX_ENV_SWIFT_VERSION}"
-fi
+done
