@@ -55,6 +55,41 @@ if ! docker info >/dev/null 2>&1; then
   export JETSON_CODEX_GROUP_REEXEC=1
   exec sg docker -c 'curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash'
 fi
+# Early storage preflight: measure the Docker data-root filesystem rather
+# than assuming / is where Docker stores its image layers. The full multi-
+# language + NVIDIA SDK image has no verified build size yet, so 40 GiB is a
+# planning allowance for image layers and extraction, NOT a measured minimum.
+# Warn under 2x that estimate (80 GiB), but never block installation.
+check_docker_free_space() {
+  local docker_root df_output free_kib free_gib
+  local estimated_needed_gib=40
+  local warning_threshold_gib=$((estimated_needed_gib * 2))
+  docker_root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)"
+  if [[ -z "$docker_root" ]]; then
+    say "WARN: Cannot determine Docker data root for disk-space preflight."
+    return 0
+  fi
+  if ! df_output="$(df -Pk "$docker_root" 2>/dev/null)"; then
+    say "WARN: Cannot read free disk space at Docker data root ($docker_root)."
+    return 0
+  fi
+  free_kib="$(printf '%s\n' "$df_output" | awk 'NR==2 {print $4}')"
+  if [[ ! "$free_kib" =~ ^[0-9]+$ ]]; then
+    say "WARN: Could not parse free space for Docker data root ($docker_root)."
+    return 0
+  fi
+  free_gib=$((free_kib / 1024 / 1024))
+  say "Docker storage: $docker_root | available: ${free_gib} GiB."
+  say "Build-space estimate: ${estimated_needed_gib} GiB; 2x warning threshold: ${warning_threshold_gib} GiB."
+  if (( free_kib < warning_threshold_gib * 1024 * 1024 )); then
+    say "WARNING: Docker storage has under 2x the estimated build headroom (${free_gib} GiB < ${warning_threshold_gib} GiB)."
+    say "Swift/toolchain extraction may fail. This is advisory; continuing installation."
+  else
+    say "Disk-space preflight: OK (at least 2x estimated build headroom)."
+  fi
+}
+check_docker_free_space
+
 if ! docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
   say "NVIDIA Docker runtime missing. Installing/configuring automatically."
   # Run the host setup from the trusted repository checkout after it is fetched.
