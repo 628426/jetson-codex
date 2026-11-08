@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1.7
-# Lean ARM64 Codex environment: NVIDIA AI/video SDK + C/C++, Python 3.12, Node LTS.
-# Target: Seeed J401 Orin Nano 8GB, JetPack 7.2.0 / L4T R39.2.0.
-# Do not use on JetPack 6.x or 7.2.1 without an explicitly supported variant.
-# NOT a rebuild of OpenAI's official image; this is an independently maintained port.
-ARG JETPACK_IMAGE=nvcr.io/nvidia/deepstream:9.1-triton-multiarch
-# Official static ARM64 mise binary, avoiding a build-time dependency on mise.run DNS.
+# Compact JetPack 7.2.0 / L4T R39.2.0 development image for Orin Nano.
+# One container: CUDA/cuDNN compiler, TensorRT 10 SDK, DeepStream 9.1, VPI,
+# Python 3.12, Node.js LTS, native Codex and Git provider CLIs.
+# NVIDIA driver/device access still comes from the Jetson container runtime.
+# Avoid the multi-GB Triton Inference Server and redundant CUDA/SDK copies.
+ARG CUDA_IMAGE=nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04
 FROM ghcr.io/jdx/mise:2026.10.4 AS mise-binary
-FROM ${JETPACK_IMAGE}
+FROM ${CUDA_IMAGE}
 
 SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -16,48 +16,77 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIPX_HOME=/opt/pipx \
     MISE_TRUSTED_CONFIG_PATHS=/root/.config/mise \
     UV_NO_PROGRESS=1
-ENV PATH="/root/.local/share/mise/shims:/root/.local/bin:/usr/local/cuda/bin:${PATH}"
+ENV PATH="/opt/nvidia/deepstream/deepstream-9.1/bin:/root/.local/share/mise/shims:/root/.local/bin:/usr/local/cuda/bin:${PATH}"
+ENV GST_PLUGIN_PATH="/opt/nvidia/deepstream/deepstream-9.1/lib/gst-plugins"
+ENV LD_LIBRARY_PATH="/opt/nvidia/deepstream/deepstream-9.1/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 
-# Noble (Ubuntu 24.04) packages. Official Jetson DeepStream 9.1 Triton image
-# supplies CUDA 13.2, TensorRT, cuDNN, GStreamer plugins and DeepStream runtime.
-# NVIDIA documents Jetson DeepStream containers as deployment-oriented: verify
-# native SDK headers separately. VPI is installed explicitly below.
-# Never upgrade the host BSP from inside a container.
-# Minimal host-independent development utilities for CUDA, C/C++, Python and
-# video/camera work. Do NOT install unused language build dependencies here.
+# Install the DeepStream 9.1 runtime's documented GStreamer dependencies plus
+# only the development and CLI packages the Codex environment actually uses.
+# No Java, Swift, PHP, Rust, Go, Erlang or Triton server.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash-completion build-essential ca-certificates \
+    bash-completion bzip2 build-essential ca-certificates \
     clang clang-format clang-tidy cmake curl \
     dnsutils fd-find ffmpeg file gdb git git-lfs gnupg gpg \
     gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+    gstreamer1.0-rtsp libgstrtspserver-1.0-0 libgstrtspserver-1.0-dev \
     i2c-tools inotify-tools iputils-ping jq libatomic1 \
-    libcurl4-openssl-dev libffi-dev libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev libjpeg-dev libpng-dev libssl-dev \
-    libv4l-dev make ninja-build openssh-client patch pipx pkg-config \
+    libcurl4-openssl-dev libffi-dev libglib2.0-dev \
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    libjansson4 libjson-glib-1.0-0 libjsoncpp-dev libyaml-cpp-dev \
+    librabbitmq4 librdkafka1 libmosquitto1 \
+    libjpeg-dev libpng-dev libssl-dev libv4l-dev libopencv-dev \
+    make ninja-build openssh-client patch pipx pkg-config \
     procps protobuf-compiler python3-dev python3-pip python3-venv \
     ripgrep rsync sqlite3 sudo swig tmux tzdata unzip usbutils \
     v4l-utils wget xz-utils zip zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# VPI is a separate JetPack SDK component. Require the NVIDIA VPI 4 packages;
-# fail the build rather than quietly shipping a GPU-only image without VPI.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libnvvpi4 vpi4-dev \
-    && rm -rf /var/lib/apt/lists/*
+# NVIDIA publishes JetPack 7.2 CUDA 13.2 / TensorRT 10.16 / VPI 4 for r39.2.
+# Add the *common SDK* repository in the container only, not the Jetson BSP.
+# Installing NVIDIA's nvidia-jetpack metapackage here would be wrong.
+RUN install -dm 0755 /etc/apt/keyrings \
+    && curl -fsSL https://repo.download.nvidia.com/jetson/jetson-ota-public.asc \
+       | gpg --dearmor -o /etc/apt/keyrings/nvidia-jetson-sdk.gpg \
+    && chmod 0644 /etc/apt/keyrings/nvidia-jetson-sdk.gpg \
+    && printf 'deb [arch=arm64 signed-by=/etc/apt/keyrings/nvidia-jetson-sdk.gpg] https://repo.download.nvidia.com/jetson/common r39.2 main\n' \
+       > /etc/apt/sources.list.d/jetson-sdk.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+       nvidia-tensorrt nvidia-tensorrt-dev libnvvpi4 vpi4-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && ldconfig
 
-# Verify installed NVIDIA libraries without short-circuiting ldconfig.
-# With pipefail, "ldconfig -p | grep -q" can return SIGPIPE (141) on a
-# successful match because grep stops reading before ldconfig finishes.
-# Save the complete list first so each check gives an accurate failure.
+# NVIDIA's official standalone Jetson SDK includes the DeepStream framework,
+# plugins, apps and headers. Fetch, unpack and delete the archive IN ONE
+# Docker layer so the 657-MB download never inflates the final image layers.
+# Deliberately omit the multi-GB Triton server and DeepStream sample media.
+ARG DEEPSTREAM_VERSION=9.1.0
+RUN curl -fLSs --retry 3 \
+      "https://github.com/NVIDIA/DeepStream/releases/download/v9.1.0/deepstream_sdk_v${DEEPSTREAM_VERSION}_jetson.tbz2" \
+      -o /tmp/deepstream-sdk.tbz2 \
+    && tar -xjf /tmp/deepstream-sdk.tbz2 -C / \
+    && rm -f /tmp/deepstream-sdk.tbz2 \
+    && test -x /opt/nvidia/deepstream/deepstream-9.1/install.sh \
+    && /opt/nvidia/deepstream/deepstream-9.1/install.sh \
+    && ln -sfn /opt/nvidia/deepstream/deepstream-9.1 /opt/nvidia/deepstream/deepstream \
+    && printf '%s\n' /opt/nvidia/deepstream/deepstream-9.1/lib \
+       > /etc/ld.so.conf.d/deepstream-9.1.conf \
+    && ldconfig
+
+# DeepStream 9.1 is coupled to JetPack 7.2's CUDA 13.2/TensorRT 10.16.
+# Run real inference/decoding tests on dexson after Docker startup; a
+# library-presence check alone does not validate hardware integration.
 RUN command -v nvcc \
+    && test -f /usr/include/aarch64-linux-gnu/NvInfer.h \
+       -o -f /usr/include/NvInfer.h \
+    && test -x /opt/nvidia/deepstream/deepstream-9.1/bin/deepstream-app \
     && ldconfig -p > /tmp/jetson-ldconfig.txt \
     && for lib in libnvinfer.so libcudnn.so libnvvpi.so; do \
-         if ! grep -F "$lib" /tmp/jetson-ldconfig.txt >/dev/null; then \
-           echo "Missing NVIDIA SDK library: $lib" >&2; exit 1; \
-         fi; \
+         grep -F "$lib" /tmp/jetson-ldconfig.txt >/dev/null || { \
+           echo "Missing NVIDIA SDK library: $lib" >&2; exit 1; }; \
        done \
     && rm /tmp/jetson-ldconfig.txt \
-    && test -d /opt/nvidia/deepstream \
     && command -v gst-inspect-1.0
 
 # Official GitHub CLI APT repository, which ships current ARM64 builds.
@@ -137,7 +166,7 @@ COPY setup-versions.sh verify.sh entrypoint.sh configure-full-trust.py codex-con
 RUN chmod 0755 /opt/jetson-codex/*.sh \
     && ln -sf /opt/jetson-codex/codex-connect.sh /usr/local/bin/codex-connect \
     && mkdir -p /workspace /root/.codex \
-    && printf '\n# Jetson Codex development tools\nexport PATH="/root/.local/share/mise/shims:/root/.local/bin:/usr/local/cuda/bin:$PATH"\n' >> /root/.bashrc
+    && printf '\n# Jetson Codex development tools\nexport PATH="/opt/nvidia/deepstream/deepstream-9.1/bin:/root/.local/share/mise/shims:/root/.local/bin:/usr/local/cuda/bin:$PATH"\n' >> /root/.bashrc
 # Build fingerprint is injected by install.sh and added only at the end so
 # documentation changes do not invalidate expensive language toolchain layers.
 ARG JETSON_CODEX_BUILD_HASH=untracked
