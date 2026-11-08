@@ -8,7 +8,7 @@ fail() { printf '[storage-check] ERROR: %s\n' "$*" >&2; exit 1; }
 ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env"
 SERVICE=jetson-codex-cloud.service
 [[ -f "$ENV_FILE" ]] || fail "No saved cloud configuration. Use configure-storage.sh to create it."
-[[ -r /dev/tty && -w /dev/tty ]] && INTERACTIVE=1 || INTERACTIVE=0
+[[ ( -t 1 || -t 2 ) && -r /dev/tty && -w /dev/tty ]] && INTERACTIVE=1 || INTERACTIVE=0
 
 # source only our own chmod-600 generated storage.env, not cloud content.
 load_storage() {
