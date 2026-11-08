@@ -24,6 +24,8 @@ check 'cuDNN' bash -lc 'ldconfig -p | grep -F libcudnn.so'
 check 'VPI' bash -lc 'ldconfig -p | grep -F libnvvpi.so'
 check 'DeepStream GStreamer' gst-inspect-1.0 nvinfer
 check 'H264/H265 NVDEC' bash /opt/jetson-codex/hardware-check.sh --video
+check 'DeepStream NVMM' bash /opt/jetson-codex/hardware-check.sh --deepstream
+check 'TensorRT GPU inference' bash /opt/jetson-codex/hardware-check.sh --tensorrt
 check 'Python 3.12' bash -lc "python3 -c 'import sys; assert sys.version_info[:2] == (3,12)'"
 check 'uv' uv --version
 check 'Ruff' ruff --version
