@@ -178,15 +178,9 @@ if [[ ! -f "$STORAGE_ENV" ]]; then
   fi
 fi
 if [[ -f "$STORAGE_ENV" ]]; then
-  say "Confirming persistent cloud mount before building Docker."
-  bash ./configure-storage.sh --mount || fail "Cloud mounting failed; Docker build NOT started."
-  # Generated with printf %q by configure-storage.sh. Paths are always local
-  # host paths, not passed into the Codex container as OAuth credentials.
-  source "$STORAGE_ENV"
-  mountpoint -q "$RCLONE_MOUNT" || fail "Cloud FUSE mount inactive: $RCLONE_MOUNT. Docker build NOT started."
-  timeout 30 rclone lsf "$RCLONE_SOURCE" --max-depth 1 >/dev/null \
-    || fail "Cloud remote is unavailable: $RCLONE_SOURCE. Docker build NOT started."
-  say "Cloud root verified: $RCLONE_SOURCE -> $RCLONE_MOUNT"
+  say "Testing cloud remote authentication and live FUSE mount before Docker."
+  bash ./storage-health.sh ||
+    fail "Cloud storage is unavailable. Repair it via the interactive menu; Docker build NOT started."
 fi
 # The one-command installer updates changed build inputs automatically.
 # Do not rebuild for README-only changes, or on healthy no-op reruns.
