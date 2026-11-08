@@ -79,9 +79,73 @@ print(f"CUDA devices: {count.value}")
 PY
 }
 
+deepstream() {
+  # Distinguish runnable DeepStream pipelines from merely having a directory
+  # that looks like an SDK installation. This runs with no GUI or camera.
+  printf '[DeepStream] SDK binary: '
+  command -v deepstream-app >/dev/null || { echo FAIL; return 1; }
+  deepstream-app --version-all 2>&1 | head -n 10 || return 1
+  local plugin
+  for plugin in nvinfer nvstreammux nvtracker nvvideoconvert nvv4l2decoder; do
+    printf '[DeepStream] GStreamer %s: ' "$plugin"
+    if gst-inspect-1.0 "$plugin" >/dev/null 2>&1; then
+      echo OK
+    else
+      echo FAIL
+      return 1
+    fi
+  done
+  printf '[DeepStream] NVIDIA NVMM frame conversion: '
+  local logfile
+  logfile="$(mktemp)"
+  if timeout 45 gst-launch-1.0 -q \
+      videotestsrc num-buffers=8 ! \
+      'video/x-raw,format=NV12,width=320,height=240,framerate=10/1' ! \
+      nvvideoconvert ! \
+      'video/x-raw(memory:NVMM),format=NV12' ! \
+      fakesink sync=false >"$logfile" 2>&1; then
+    echo 'PASS (DeepStream conversion executed on Jetson)'
+    rm -f "$logfile"
+    return 0
+  fi
+  echo FAIL
+  tail -n 15 "$logfile" >&2
+  rm -f "$logfile"
+  return 1
+}
+
+tensorrt() {
+  # Compile and execute a tiny TensorRT network on GPU, not a library-name
+  # check. This also demonstrates that C++ TRT development headers work.
+  local tmp
+  [[ -f /opt/jetson-codex/tensorrt-smoke.cpp ]] ||
+    { echo 'TensorRT smoke source is missing' >&2; return 1; }
+  tmp="$(mktemp -d /tmp/jetson-trt-XXXXXX)"
+  trap 'rm -rf "$tmp"' RETURN
+  printf '[TensorRT] Compiling TensorRT 10 CUDA test: '
+  if ! timeout 90 g++ -std=c++17 -O2 \
+      -I/usr/local/cuda/include -L/usr/local/cuda/lib64 \
+      /opt/jetson-codex/tensorrt-smoke.cpp \
+      -o "$tmp/tensorrt-smoke" -lnvinfer -lcudart \
+      >"$tmp/compile.log" 2>&1; then
+    echo FAIL
+    tail -n 25 "$tmp/compile.log" >&2
+    return 1
+  fi
+  echo OK
+  printf '[TensorRT] Building engine and running real GPU inference: '
+  if timeout 180 "$tmp/tensorrt-smoke"; then
+    return 0
+  fi
+  echo FAIL
+  return 1
+}
+
 case "${1:---devices}" in
   --devices) devices ;;
   --video) video ;;
   --cuda) cuda ;;
-  *) echo "Usage: hardware-check.sh [--devices|--cuda|--video]" >&2; exit 2 ;;
+  --deepstream) deepstream ;;
+  --tensorrt) tensorrt ;;
+  *) echo "Usage: hardware-check.sh [--devices|--cuda|--video|--deepstream|--tensorrt]" >&2; exit 2 ;;
 esac
