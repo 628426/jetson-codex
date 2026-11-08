@@ -60,7 +60,8 @@ RUN install -dm 0755 /etc/apt/keyrings \
 # NVIDIA's official standalone Jetson SDK includes the DeepStream framework,
 # plugins, apps and headers. Fetch, unpack and delete the archive IN ONE
 # Docker layer so the 657-MB download never inflates the final image layers.
-# Deliberately omit the multi-GB Triton server and DeepStream sample media.
+# Remove bundled demonstration videos after SDK installation. Model configs,
+# application binaries and development headers remain. RTSP inputs work normally.
 ARG DEEPSTREAM_VERSION=9.1.0
 RUN curl -fLSs --retry 3 \
       "https://github.com/NVIDIA/DeepStream/releases/download/v9.1.0/deepstream_sdk_v${DEEPSTREAM_VERSION}_jetson.tbz2" \
@@ -69,10 +70,19 @@ RUN curl -fLSs --retry 3 \
     && rm -f /tmp/deepstream-sdk.tbz2 \
     && test -x /opt/nvidia/deepstream/deepstream-9.1/install.sh \
     && /opt/nvidia/deepstream/deepstream-9.1/install.sh \
+    && rm -rf /opt/nvidia/deepstream/deepstream-9.1/samples/streams \
     && ln -sfn /opt/nvidia/deepstream/deepstream-9.1 /opt/nvidia/deepstream/deepstream \
     && printf '%s\n' /opt/nvidia/deepstream/deepstream-9.1/lib \
        > /etc/ld.so.conf.d/deepstream-9.1.conf \
     && ldconfig
+
+# JetPack 7.2 uses the host's NVIDIA driver. CUDA forward-compatibility
+# shim packages may intercept libcuda and break Orin GPU initialisation.
+RUN for pkg in cuda-compat-13-2 cuda-compat-orin-13-2; do \
+      if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -Fxq 'install ok installed'; then \
+        apt-get purge -y "$pkg"; \
+      fi; \
+    done
 
 # DeepStream 9.1 is coupled to JetPack 7.2's CUDA 13.2/TensorRT 10.16.
 # Run real inference/decoding tests on dexson after Docker startup; a
