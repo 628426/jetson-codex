@@ -2,7 +2,7 @@
 
 **Goal:** A lean native ARM64 Jetson Codex development container with NVIDIA GPU/video SDKs, C/C++, system Python 3.12, Node.js and persistent Git/cloud connections.
 
-**Host target:** JetPack 7.2 (L4T 39.2), Ubuntu 24.04, arm64. **Base:** NVIDIA's official `nvcr.io/nvidia/deepstream:9.1-triton-multiarch` for JetPack 7.2. CUDA, TensorRT, cuDNN and DeepStream are bundled. VPI is requested as a separate package and must pass build verification.
+**Host target:** JetPack 7.2.0 (L4T R39.2.0), Ubuntu 24.04, arm64. **Base:** NVIDIA CUDA 13.2.1 + cuDNN *development* image. TensorRT 10.16 and VPI 4 are installed from NVIDIA's Jetson r39.2 SDK repository; the standalone DeepStream 9.1 Jetson SDK comes from NVIDIA's GitHub release. **No Triton Inference Server.**
 
 This is an independently authored ARM64 development image, **not OpenAI's official Codex Universal image**. It intentionally provides a narrower, leaner toolset. The complete Docker build and NVIDIA hardware tests still need validation on the Orin.
 
@@ -31,88 +31,58 @@ without new cloud authorisation:
 curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash
 ```
 
-## Hardware-accelerated TensorRT and DeepStream: non-negotiable
+## One smaller container, real NVIDIA hardware
 
-This is a **single headless development container**, not a lightweight Codex
-front-end with an optional second NVIDIA image. It must support CUDA C/C++,
-TensorRT engine building and GPU inference, DeepStream pipelines, GStreamer
-`nvinfer`, NVDEC, cameras/RTSP, VPI and Jetson I/O.
+The image provides **native Codex CLI, CUDA C/C++ development, cuDNN,
+TensorRT 10 engine building and inference, DeepStream 9.1, VPI, GStreamer,
+RTSP/NVDEC and Jetson I/O** in one headless environment.
 
-**Why keep the large `9.1-triton-multiarch` base for now?**
-NVIDIA's smaller Jetson `9.1-samples-multiarch` image contains the
-DeepStream/TensorRT *runtime*, but is documented as **deployment-only**.
-The Triton-tagged image also includes extra NVIDIA development libraries.
-Triton **Inference Server** itself is not required for `nvinfer` TensorRT
-pipelines; the tag is retained for development capability, not for serving
-Triton models. Replacing it with a smaller custom SDK image is a future
-optimisation, not something to do by silently losing DeepStream features.
+Unlike the old `9.1-triton-multiarch` base, it starts from:
 
-Your Jetson host already has CUDA 13.2, TensorRT 10.16, cuDNN 9 and VPI 4.1.
-The NVIDIA runtime exposes host GPU drivers and device nodes. It does **not**
-automatically provide the container with the full CUDA, cuDNN, TensorRT or
-DeepStream development environments. We deliberately **do not bind-mount
-host library directories over the image's libraries**, which would create
-an unsupported and potentially incompatible mix. CUDA/TensorRT components
-are supplied by the DeepStream image, while driver access is supplied by
-the host. No extra toolchains are installed on the host.
+```text
+nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04
+```
 
-After the first successful image build and container startup, the installer
-now checks:
+Then it installs just NVIDIA's JetPack 7.2 TensorRT/VPI development packages
+and extracts `deepstream_sdk_v9.1.0_jetson.tbz2`. Downloaded archives and
+bundled sample videos are removed **within their build layer**. The previous
+Triton Dockerfile remains as a non-default
+[rollback source](Dockerfile.jetpack-7.2.0.triton-legacy).
 
-- CUDA driver device access and host/container GPU counts.
-- Real H.264/H.265 decoding via the Jetson `nvv4l2decoder`.
-- Actual headless `nvvideoconvert` conversion into NVIDIA NVMM memory;
-  DeepStream `nvinfer`, `nvstreammux`, `nvtracker` and decoder plugins.
-- A small C++ **TensorRT 10 engine build and real CUDA GPU inference**,
-  checking that `3.25 + 3.25 = 6.5` through `enqueueV3`.
+**No host CUDA directory bind mounts** are required. The NVIDIA container
+runtime exposes compatible GPU drivers and hardware devices; the SDK and
+development headers live in the image. No build toolchains are installed
+on the Jetson host.
 
-Re-run each acceptance test independently from the Jetson host:
+A smaller base is not itself proof of compatibility. After building, the
+installer still requires all these acceptance tests:
+
+- CUDA driver access and matching host/container GPU device counts.
+- H.264 and H.265 hardware decoding through `nvv4l2decoder`.
+- DeepStream GStreamer plugins `nvinfer`, `nvstreammux`, `nvtracker`,
+  `nvvideoconvert`; actual headless NVMM processing.
+- A compiled TensorRT 10 C++ smoke test that builds a network and executes
+  GPU inference via `enqueueV3`.
+
+On `dexson`, individual tests can be repeated with:
 
 ```bash
-docker exec jetson-codex bash /opt/jetson-codex/hardware-check.sh --deepstream
 docker exec jetson-codex bash /opt/jetson-codex/hardware-check.sh --tensorrt
+docker exec jetson-codex bash /opt/jetson-codex/hardware-check.sh --deepstream
 docker exec jetson-codex bash /opt/jetson-codex/hardware-check.sh --video
 ```
 
-The bundled GStreamer pipeline proves NVMM conversion and plugin loading,
-**not** that a user-selected DeepStream model has performed `nvinfer`
-inference. Test your specific model/config and RTSP camera afterwards.
-The TensorRT smoke test does build an engine and execute an inference.
-NVIDIA officially labels Jetson DeepStream containers deployment-oriented;
-building custom DeepStream plugins may still require additional SDK source
-and headers. Full hardware results have not yet been confirmed on `dexson`.
-
-## NVIDIA SDK: DeepStream, TensorRT, cuDNN and VPI
-
-The JetPack 7.2.0 Dockerfile starts from NVIDIA's **official Jetson DeepStream 9.1 Triton image**:
-
-```text
-nvcr.io/nvidia/deepstream:9.1-triton-multiarch
-```
-
-This is the version aligned with **JetPack 7.2 GA / L4T R39.2**.
-It provides the DeepStream runtime, CUDA 13.2, TensorRT, cuDNN,
-GStreamer NVIDIA plugins and Triton backends. The Dockerfile additionally
-requests NVIDIA's `libnvvpi4` and `vpi4-dev` packages, and checks that
-SDK libraries exist. **The VPI packages must be available from configured
-APT repositories in the base image.** If they aren't, the build fails
-explicitly rather than silently producing an incomplete SDK.
-
-NVIDIA describes its Jetson DeepStream containers as **deployment-only**.
-Adding C/C++ compilers and general toolchains does *not* automatically make
-the entire DeepStream SDK development environment supported. Building
-custom DeepStream plugins may still require NVIDIA's Jetson SDK source,
-headers and build procedure. That is a separate acceptance test.
-
-**This configuration is source-reviewed but has not been built on your
-Orin.** Do not claim full hardware support until `docker compose build`,
-`/opt/jetson-codex/verify.sh`, and a real DeepStream sample pass.
+These tests verify real TensorRT GPU execution and DeepStream pipeline
+components, but do not yet prove an arbitrary model/config or custom
+DeepStream plugin build. NVIDIA calls its prebuilt Jetson DeepStream
+containers deployment-oriented. This separately assembled developer image
+requires its own acceptance testing, and **has not yet passed a live build
+on `dexson`**.
 
 References:
-
-- [NVIDIA DeepStream 9.1 Jetson containers](https://docs.nvidia.com/metropolis/deepstream/9.1/text/DS_docker_containers.html)
-- [NVIDIA DeepStream 9.1 source and Jetson build guidance](https://github.com/NVIDIA/DeepStream)
-- [JetPack 7.2 component versions](https://developer.nvidia.com/embedded/jetpack/downloads/archive-7.2)
+- [NVIDIA DeepStream 9.1 release assets](https://github.com/NVIDIA/DeepStream/releases/tag/v9.1.0)
+- [NVIDIA JetPack 7.2 SDK versions](https://developer.nvidia.com/embedded/jetpack/downloads/archive-7.2)
+- [NVIDIA DeepStream Docker guidance](https://docs.nvidia.com/metropolis/deepstream/9.1/text/DS_docker_containers.html)
 
 ## Version-specific Dockerfile selection
 
@@ -184,8 +154,27 @@ connection without SSH OAuth forwarding, it **prints the Windows PowerShell
 SSH command and pauses before building Docker**. It does not continue into
 the multi-GB image build until the cloud connection is completed.
 Once linked, credentials persist on the host, so future runs do not
-require OAuth. If setup was interrupted, rerun and select an existing
-rclone remote if offered.
+require OAuth.
+
+### Rclone health checks and interactive recovery
+
+Every installer run with existing cloud configuration checks **both**
+`rclone lsf` against the cloud project root **and** a real directory listing
+through the FUSE mount. It also checks the user systemd service and
+`mountpoint`; an active service alone is not considered healthy.
+
+If any check fails, installation **pauses before building Docker** and asks:
+
+1. Retry or restart the FUSE mount.
+2. Reconnect the existing OneDrive/Google Drive OAuth token in your browser.
+3. Reconfigure the remote or cloud project folder.
+4. Abort without changing the Docker container.
+
+Options 2 and 3 require the Windows SSH redirect (shown above). Without it,
+the installer prints the exact PowerShell command instead of proceeding.
+Failed attempts return to the menu. The script never runs `rm -rf` on the
+cloud mount and refuses to force-unmount a busy filesystem. Pending VFS
+write-back operations must finish before intentionally restarting the mount.
 
 ## Cloud-backed projects and repeatable health checks
 
@@ -376,36 +365,28 @@ space on the filesystem holding Docker's configured `DockerRootDir`.
 This works even when Docker stores its layers on a different partition
 from `/`. There is no new host package.
 
-The lean NVIDIA/Codex container's final size is **not yet measured
-on this Jetson**. For now the installer uses a **40 GiB planning
-allowance** for image layers and toolchain extraction, and warns below
-**80 GiB available (twice that allowance)**. These values are an
-estimate, not a guarantee of sufficient space. The warning is advisory;
-it does not abort or prune images or volumes.
+The new CUDA/cuDNN + TensorRT + DeepStream image's final size is
+**not yet measured on dexson**. The installer uses a **24 GiB advisory
+build-headroom allowance** and warns below **48 GiB free**. This is an
+estimate, not a guarantee. The warning doesn't stop Docker or delete
+anything. Actual image size is reported when the container starts.
 
 ## Automatic Docker build-cache cleanup
 
-Once `install.sh` has **successfully built the image and started the
-persistent `jetson-codex` container**, it immediately runs:
+Only **after** a new image builds, starts and passes the CUDA, TensorRT,
+DeepStream and hardware-decoding checks, the installer executes:
 
 ```bash
 docker buildx prune --all --force
+docker image prune --force
+docker system df
 ```
 
-This frees unused BuildKit build cache on the selected builder and then
-prints `docker system df`. **It never prunes Docker images, containers,
-named volumes or their data.** Existing Codex/GitHub/GitLab/Azure credentials
-and project files are preserved.
-
-The command prunes **all build cache on the selected Docker builder**,
-including cache created by other projects on the same builder. Future
-rebuilds may need to download/recompile toolchains again. Cleanup runs
-only after a successful *new* image build and container startup; it
-doesn't run on ordinary no-op installer reruns. A cleanup failure reports
-a warning but does not stop the running container.
-
-This does not shrink the finished image itself. Free space reclaimed depends
-on which cached layers Docker can safely delete.
+BuildKit cache and dangling/untagged old images are removed. **Active images,
+running containers, named volumes and authentication data are preserved.**
+BuildKit cache removal also affects other projects using the same builder;
+future rebuilds may be slower. This cleans old build artefacts, not the
+finished image layers.
 
 ## One-command install or update
 
@@ -699,7 +680,7 @@ OpenAI's general-purpose `codex-universal` image.
 
 | Included | Implementation |
 |---|---|
-| NVIDIA GPU / CV | DeepStream 9.1 Triton base, CUDA, cuDNN, TensorRT, VPI, NVIDIA GStreamer/NVDEC |
+| NVIDIA GPU / CV | CUDA 13.2.1 + cuDNN devel base, TensorRT 10.16, VPI 4, standalone DeepStream 9.1, NVIDIA GStreamer/NVDEC |
 | C/C++ | GCC, Clang, CMake, Ninja, GDB, formatting/linting, headers for GStreamer and V4L2 |
 | Python | Ubuntu 24.04's Python **3.12** and `pipx` |
 | Python tooling | `uv`, `ruff`; additional project dependencies installed on demand |
@@ -746,4 +727,4 @@ Codex is a privileged *developer* inside its container, not a host admin. The de
 
 This repository publishes the **Docker build sources**, not a prebuilt Docker image. The full image must be built and hardware-verified on a Jetson Orin or equivalent ARM64 builder. Successfully running `docker compose build` and `/opt/jetson-codex/verify.sh` on your actual device is the acceptance test.
 
-The image now deliberately excludes Swift, PHP, Erlang/Elixir, Java, Ruby, Go, Rust, Bun and Bazel to minimise storage. The NVIDIA DeepStream/Triton base remains relatively large because GPU/video functionality is required. The one-command installer performs the full build and hardware checks; GitHub CI currently validates script syntax and the lean configuration, not a GPU-equipped ARM64 build.
+The image now deliberately excludes Swift, PHP, Erlang/Elixir, Java, Ruby, Go, Rust, Bun and Bazel to minimise storage. The Triton server is excluded; the remaining CUDA developer SDK and DeepStream still require several GB. The one-command installer performs the full build and hardware checks; GitHub CI currently validates script syntax and the lean configuration, not a GPU-equipped ARM64 build.
