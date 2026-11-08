@@ -55,14 +55,13 @@ if ! docker info >/dev/null 2>&1; then
   export JETSON_CODEX_GROUP_REEXEC=1
   exec sg docker -c 'curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash'
 fi
-# Early storage preflight: measure the Docker data-root filesystem rather
-# than assuming / is where Docker stores its image layers. The full multi-
-# language + NVIDIA SDK image has no verified build size yet, so 40 GiB is a
-# planning allowance for image layers and extraction, NOT a measured minimum.
-# Warn under 2x that estimate (80 GiB), but never block installation.
+# Early storage preflight: free space on the Docker data-root filesystem.
+# The new CUDA/cuDNN + TRT + standalone DeepStream image has not yet been
+# measured on dexson. 24 GiB is an advisory build-headroom estimate, not a
+# measured final size. Warn below twice that estimate, never auto-delete data.
 check_docker_free_space() {
   local docker_root df_output free_kib free_gib
-  local estimated_needed_gib=40
+  local estimated_needed_gib=24
   local warning_threshold_gib=$((estimated_needed_gib * 2))
   docker_root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)"
   if [[ -z "$docker_root" ]]; then
@@ -83,7 +82,7 @@ check_docker_free_space() {
   say "Build-space estimate: ${estimated_needed_gib} GiB; 2x warning threshold: ${warning_threshold_gib} GiB."
   if (( free_kib < warning_threshold_gib * 1024 * 1024 )); then
     say "WARNING: Docker storage has under 2x the estimated build headroom (${free_gib} GiB < ${warning_threshold_gib} GiB)."
-    say "Swift/toolchain extraction may fail. This is advisory; continuing installation."
+    say "CUDA SDK extraction may need more headroom. This is advisory; continuing installation."
   else
     say "Disk-space preflight: OK (at least 2x estimated build headroom)."
   fi
@@ -327,22 +326,30 @@ if ! docker ps --filter "name=^/$CONTAINER$" --format '{{.Names}}' | grep -Fxq "
   fail "$CONTAINER is not running; inspect 'docker logs $CONTAINER'."
 fi
 
-# Prune the BuildKit cache only AFTER a successful image build and startup.
-# This clears the selected Docker builder's cache, including cache shared
-# with OTHER projects, but deliberately preserves all images, containers,
-# named volumes and their data. No prune on an unchanged-image rerun.
-if (( BUILD )); then
-  say "Built image is running. Reclaiming Docker build cache (images and volumes preserved)."
-  if docker buildx prune --all --force; then
-    say "Docker build cache cleanup completed."
-    docker system df || true
-  else
-    say "WARNING: Docker build cache cleanup failed. Image and container are still running."
-  fi
-fi
-
 # Verify NVIDIA devices and execute a real NVDEC decode on every rerun.
 hardware_health
+
+# Prune BuildKit cache only AFTER successful container startup AND NVIDIA
+# runtime acceptance tests. A failing GPU test retains expensive build cache
+# so an iterative fix does not require downloading/rebuilding from scratch.
+if (( BUILD )); then
+  say "New image passed hardware checks; reclaiming unused Docker build cache."
+  if docker buildx prune --all --force; then
+    say "Docker build cache cleanup completed."
+  else
+    say "WARNING: Build cache cleanup failed; running container is unaffected."
+  fi
+  # Old untagged revisions of jetson-codex would otherwise occupy many GiB.
+  # Dangling-image prune never deletes the active image or named volumes.
+  docker image prune --force ||
+    say "WARNING: Dangling image cleanup failed; running container is unaffected."
+  docker system df || true
+fi
+
+image_bytes="$(docker image inspect --format '{{.Size}}' "$IMAGE" 2>/dev/null || true)"
+if [[ "$image_bytes" =~ ^[0-9]+$ ]]; then
+  say "Built image (uncompressed filesystem layers): $(awk -v n="$image_bytes" 'BEGIN { printf "%.2f GiB", n/1073741824 }')"
+fi
 
 # User-requested full trust: Codex may execute commands without approval prompts.
 # Persist in the existing Codex auth volume; keep the container boundary.
