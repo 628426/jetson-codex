@@ -19,3 +19,32 @@ jobs:
         run: python3 -m py_compile configure-full-trust.py
       - name: Validate Docker Compose configuration
         run: docker compose config --quiet
+      - name: Check single-version toolchain policy
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          names = [
+              "PYTHON_VERSION", "NODE_VERSION", "JAVA_VERSION",
+              "RUST_VERSION", "GO_VERSION", "RUBY_VERSION",
+              "PHP_VERSION", "SWIFT_VERSION", "ERLANG_VERSION",
+              "ELIXIR_VERSION", "BUN_VERSION",
+          ]
+          obsolete = [
+              "PYTHON_VERSIONS", "NODE_VERSIONS", "JAVA_VERSIONS",
+              "RUST_VERSIONS", "GO_VERSIONS", "RUBY_VERSIONS",
+              "PHP_VERSIONS", "SWIFT_VERSION_1", "SWIFT_VERSION_2",
+              "SWIFT_VERSION_3",
+          ]
+          for file in ("Dockerfile", "Dockerfile.jetpack-7.2.0"):
+              src = Path(file).read_text()
+              for name in names:
+                  assert src.count(f"ARG {name}=") == 1, (file, name)
+              for name in obsolete:
+                  assert name not in src, (file, name)
+              assert src.count("rustup toolchain install") == 1, file
+              assert src.count("swiftly install ") == 1, file
+              assert "snapshot" not in src, file
+          entry = Path("setup-versions.sh").read_text()
+          assert "mise use" not in entry and "rustup default" not in entry
+          print("Single-version toolchain policy passed")
+          PY
