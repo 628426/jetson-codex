@@ -16,7 +16,12 @@ install_mount() {
   [[ -f "$ENV_FILE" ]] || fail "Run configure-storage.sh first."
   # shellcheck disable=SC1090
   source "$ENV_FILE"
-  mkdir -p "$RCLONE_MOUNT" "$RCLONE_CACHE" "$HOME/.config/systemd/user"
+  mkdir -p "$RCLONE_CACHE" "$HOME/.config/systemd/user"
+  # mountpoint -q can detect an already-mounted but unresponsive FUSE endpoint
+  # without traversing it. Do not call mkdir on a stale mount.
+  if ! mountpoint -q "$RCLONE_MOUNT"; then
+    mkdir -p "$RCLONE_MOUNT"
+  fi
   local unit="$HOME/.config/systemd/user/jetson-codex-cloud.service"
   cat > "$unit" <<EOF
 [Unit]
