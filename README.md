@@ -487,7 +487,7 @@ You can now ask Codex to inspect `/workspace`, compile software and run hardware
 
 Codex login persists in the `jetson-codex-auth` Docker volume. GitHub CLI and Git credential settings persist separately in `jetson-github-auth` and `jetson-git-config`. Both startup methods use the same named volumes.
 
-**Build resource warning:** the heavy general-purpose toolchains were removed. The NVIDIA DeepStream/Triton base and its GPU development libraries remain large, and Docker builds still require NVMe headroom. The installer warns below the estimated storage threshold; do not claim completion until the image and on-device tests pass.
+**Build resource warning:** Triton and the heavy general-purpose toolchains have been removed. The CUDA/cuDNN developer image, TensorRT libraries and standalone DeepStream SDK still require several GB. The installer warns below its estimated storage threshold; the actual image size and NVIDIA hardware checks must be confirmed on the Orin.
 
 ## Start, attach, stop and restart the named container
 
