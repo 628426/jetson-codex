@@ -4,7 +4,7 @@
 
 **Host target:** JetPack 7.2 (L4T 39.2), Ubuntu 24.04, arm64. **Base:** NVIDIA's official `nvcr.io/nvidia/deepstream:9.1-triton-multiarch` for JetPack 7.2. CUDA, TensorRT, cuDNN and DeepStream are bundled. VPI is requested as a separate package and must pass build verification.
 
-This is an independently authored ARM64 port, **not OpenAI's official Codex Universal image**. Tool *presence* and selectable language versions are the target; exact package versions and behaviour need validation. It has **not been built or tested on your Orin**.
+This is an independently authored ARM64 development image, **not OpenAI's official Codex Universal image**. It intentionally provides a narrower, leaner toolset. The complete Docker build and NVIDIA hardware tests still need validation on the Orin.
 
 ## Quick start: Windows PowerShell (OneDrive / Google Drive login)
 
@@ -325,8 +325,8 @@ space on the filesystem holding Docker's configured `DockerRootDir`.
 This works even when Docker stores its layers on a different partition
 from `/`. There is no new host package.
 
-The full JetPack + multi-language container's final size is **not yet
-measured on this Jetson**. For now the installer uses a **40 GiB planning
+The lean NVIDIA/Codex container's final size is **not yet measured
+on this Jetson**. For now the installer uses a **40 GiB planning
 allowance** for image layers and toolchain extraction, and warns below
 **80 GiB available (twice that allowance)**. These values are an
 estimate, not a guarantee of sufficient space. The warning is advisory;
@@ -417,7 +417,7 @@ download, use `curl -fsSLo install.sh
 https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh`,
 inspect it, then run `bash install.sh`.
 
-The full multi-language image is substantial, and remains unverified until
+The NVIDIA development image remains substantial and unverified until
 the build and `/opt/jetson-codex/verify.sh` succeed on a real Jetson.
 
 ## Install (on your Orin)
@@ -695,4 +695,4 @@ Codex is a privileged *developer* inside its container, not a host admin. The de
 
 This repository publishes the **Docker build sources**, not a prebuilt Docker image. The full image must be built and hardware-verified on a Jetson Orin or equivalent ARM64 builder. Successfully running `docker compose build` and `/opt/jetson-codex/verify.sh` on your actual device is the acceptance test.
 
-The image is intentionally extensive. If the full build fails at a particular upstream installer, check the installer and CPU/RAM requirements. Both PHP and Swift are enabled by default; they can be temporarily excluded when diagnosing a build using `docker build --build-arg INSTALL_PHP=0 --build-arg INSTALL_SWIFT=0 ...`, but such a build is **not** the full inventory.
+The image now deliberately excludes Swift, PHP, Erlang/Elixir, Java, Ruby, Go, Rust, Bun and Bazel to minimise storage. The NVIDIA DeepStream/Triton base remains relatively large because GPU/video functionality is required. The one-command installer performs the full build and hardware checks; GitHub CI currently validates script syntax and the lean configuration, not a GPU-equipped ARM64 build.
