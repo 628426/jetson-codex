@@ -24,32 +24,20 @@ check 'cuDNN' bash -lc 'ldconfig -p | grep -F libcudnn.so'
 check 'VPI' bash -lc 'ldconfig -p | grep -F libnvvpi.so'
 check 'DeepStream GStreamer' gst-inspect-1.0 nvinfer
 check 'H264/H265 NVDEC' bash /opt/jetson-codex/hardware-check.sh --video
-check 'Python' python3 --version
-check 'Installed Pythons' mise ls python
-check 'Node.js' node --version
-check 'Installed Nodes' mise ls node
-check 'npm' npm --version
-check 'TypeScript' tsc --version
-check 'pnpm' pnpm --version
-check 'Yarn' yarn --version
-check 'Rust' rustc --version
-check 'Rust toolchains' rustup toolchain list
-check 'Go' go version
-check 'Java' java -version
-check 'Gradle' gradle --version
-check 'Maven' mvn --version
-check 'Ruby' ruby --version
-check 'Bun' bun --version
-check 'Bazelisk' bazelisk --version
-check 'Erlang' erl -eval 'erlang:display(erlang:system_info(otp_release)),halt().' -noshell
-check 'Elixir' elixir --version
-check 'Poetry' poetry --version
+check 'Python 3.12' bash -lc "python3 -c 'import sys; assert sys.version_info[:2] == (3,12)'"
 check 'uv' uv --version
+check 'Ruff' ruff --version
+check 'Node.js' node --version
+check 'npm' npm --version
+check 'pnpm' pnpm --version
+check 'TypeScript' tsc --version
 check 'Clang' clang --version
+check 'Clang-format' clang-format --version
 check 'CMake' cmake --version
+check 'Ninja' ninja --version
 check 'GStreamer' gst-inspect-1.0 --version
-if command -v php >/dev/null 2>&1; then check 'PHP' php --version; check 'Composer' composer --version; fi
-if command -v swift >/dev/null 2>&1; then check 'Swift' swift --version; fi
+check 'FFmpeg' ffmpeg -version
+check 'Git LFS' git lfs version
 printf '%-22s ' 'CUDA device access'
 if python3 - <<'PY'
 import ctypes
