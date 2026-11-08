@@ -1,6 +1,6 @@
 # Jetson Codex Ultimate
 
-**Goal:** One native ARM64 developer container for Jetson Orin, with NVIDIA JetPack userland, GPU support, Codex CLI, and the complete *language/toolchain inventory* from OpenAI's `codex-universal` Dockerfile as reviewed 6 November 2026.
+**Goal:** One native ARM64 developer container for Jetson Orin, with NVIDIA JetPack userland, GPU support, Codex CLI, and a single current stable version of each major language toolchain.
 
 **Host target:** JetPack 7.2 (L4T 39.2), Ubuntu 24.04, arm64. **Base:** NVIDIA's official `nvcr.io/nvidia/deepstream:9.1-triton-multiarch` for JetPack 7.2. CUDA, TensorRT, cuDNN and DeepStream are bundled. VPI is requested as a separate package and must pass build verification.
 
@@ -410,7 +410,7 @@ You can now ask Codex to inspect `/workspace`, compile software and run hardware
 
 Codex login persists in the `jetson-codex-auth` Docker volume. GitHub CLI and Git credential settings persist separately in `jetson-github-auth` and `jetson-git-config`. Both startup methods use the same named volumes.
 
-**Build resource warning:** this is deliberately huge. Compiling four PHP versions, Erlang, Ruby and loading five Python versions, 13 Rust toolchains, six JDKs etc takes substantial disk, RAM, CPU and time. NVMe recommended; limit other workloads. If the Orin memory is tight, build with extra swap or on an ARM64 builder while retaining this target architecture. Do not claim completion until the image builds and `verify.sh` passes.
+**Build resource warning:** each language now gets exactly **one pinned stable toolchain** instead of many historical releases. The NVIDIA/Triton base, Swift, Erlang and source-built PHP can still require substantial disk, RAM and build time on the Orin. NVMe is recommended; don't claim completion until the image builds and the on-device checks pass.
 
 ## Start, attach, stop and restart the named container
 
@@ -595,41 +595,39 @@ USB hardware, recreate the hardware container to refresh device mappings.
 
 The hardware script inspects existing `/dev/video*`, `/dev/i2c-*`, `/dev/gpiochip*`, `/dev/ttyUSB*`, and `/dev/ttyACM*` nodes, and passes each into the container. CSI camera access may also require `/tmp/argus_socket`, which is mounted only if present. Access still depends on device permissions, driver compatibility, and the specific camera interface. It does **not** grant blanket `--privileged` access. Both launch methods use the same explicitly named `jetson-codex-auth` Docker volume.
 
-## Version selectors
+## Single-version toolchains (pinned 8 November 2026)
 
-These follow the upstream environment variable conventions (but switch versions using `mise` rather than OpenAI's exact `pyenv`/`nvm` implementation):
+The Dockerfile was audited to install **one stable version per language**, not
+the multiple historical versions from the original `codex-universal` inventory.
+These are concrete versions, not floating build-time downloads:
 
-```
-CODEX_ENV_PYTHON_VERSION=3.12
-CODEX_ENV_NODE_VERSION=22
-CODEX_ENV_RUBY_VERSION=3.4.4
-CODEX_ENV_RUST_VERSION=1.95.0
-CODEX_ENV_GO_VERSION=1.25.1
-CODEX_ENV_JAVA_VERSION=21
-CODEX_ENV_PHP_VERSION=8.5
-CODEX_ENV_SWIFT_VERSION=6.2
-```
-
-Specify them in the Compose `environment:` section (or as `docker run -e KEY=value ...` for a standalone launcher). The values must be preinstalled by the Dockerfile.
-
-## Complete inventory targeted
-
-| Component | Versions / features |
+| Toolchain | Pinned version |
 |---|---|
-| Python | 3.10, 3.11.12, 3.12, 3.13, 3.14.0; Poetry, uv, Ruff, Black, mypy, pyright, isort, pytest |
-| Node | 18, 20, 22, 24; npm, pnpm, Yarn, TypeScript, ESLint, Prettier |
-| Rust | 1.83.0, 1.84.1, 1.85.1, 1.86.0, 1.87.0, 1.88.0, 1.89.0, 1.90.0, 1.91.1, 1.92.0, 1.93.0, 1.94.0, 1.95.0; Clippy, rustfmt |
-| Go | 1.22.12, 1.23.8, 1.24.3, 1.25.1; golangci-lint |
-| Java | 17, 21, 22, 23, 24, 25; Gradle 8.14; Maven 3.9.10 |
-| Ruby | 3.2.3, 3.3.8, 3.4.4 |
-| PHP | 8.2, 8.3, 8.4, 8.5 source snapshots; Composer. `INSTALL_PHP=1` |
-| Swift | 5.10, 6.1, 6.2, where ARM64 installer works. `INSTALL_SWIFT=1` |
-| Erlang/Elixir | Erlang 27.1.2; Elixir 1.18.3-otp-27 |
-| Others | Bun 1.2.14, Bazelisk 1.26.0, GCC, Clang, Clang-Tidy/Format, CMake, Ninja, NASM, GDB, SWIG, Protobuf, SQLite, git, git-lfs, jq, ripgrep (see note), rsync, Git tooling, SSH, GStreamer, V4L2, GPIO, I²C |
-| NVIDIA | DeepStream 9.1, CUDA 13.2, cuDNN, TensorRT, NVIDIA GStreamer plugins and Triton in official base; VPI 4 explicitly installed and verified if NVIDIA APT packages resolve |
-| Codex | OpenAI Codex standalone ARM64-musl release binary, independently of Node |
+| Python | 3.15.2; Ruff, Black, mypy, pyright, isort, pytest, Poetry, uv |
+| Node.js | 26.11.0; npm, pnpm, Yarn Classic, ESLint, Prettier, TypeScript |
+| Rust | 1.99.1; rustfmt, Clippy |
+| Go | 1.27.3; golangci-lint 2.15.0 |
+| Java | JDK 27; Gradle 9.9.0, Maven 3.10.0 |
+| Ruby | 4.0.9 |
+| PHP | 8.5.12 stable source release; Composer |
+| Swift | 6.4.2 on aarch64 |
+| Erlang / Elixir | OTP 29.1.2 / Elixir 1.20.5-otp-29 |
+| Bun | 1.4.4 |
+| Bazelisk | 1.30.0 |
+| Other development tools | C/C++, CUDA/TensorRT/VPI/DeepStream, Git, Git LFS, gh, glab, Azure CLI, OpenAI Codex ARM64 |
 
-**Gap vs exact OpenAI environment:** both use Ubuntu **24.04**, but this image uses NVIDIA's DeepStream 9.1 Triton base rather than the upstream general-purpose Ubuntu base. `mise` replaces upstream `pyenv`/`nvm`, so those exact managers are absent. The upstream ARM64 reference excludes Swift, but this image attempts Swift via its supported ARM64 binaries. The upstream docs also conflict with its Dockerfile for Node24/PHP8.5, so this file uses the Dockerfile versions. `ripgrep` is installed by apt as `rg` (Ubuntu version differs). Java 11 is not part of OpenAI's ARM64 JDK set. Build failures on upstream download/toolchain combinations must be fixed, not silently ignored.
+The base image and Ubuntu system Python may contain runtime dependencies
+independently of these explicitly installed toolchains. No additional
+language compiler versions are installed by our build instructions.
+
+The former `CODEX_ENV_*_VERSION` runtime switches are **disabled**.
+They could silently download extra versions when starting a container.
+If a project requires an older compiler, install it deliberately in an
+isolated project environment or change the Dockerfile and rebuild.
+
+This makes the image significantly leaner, but does not mean the full
+ARM64 build is tested. Tool availability, runtime compatibility, and the
+actual post-build image size still require validation on `dexson`.
 
 ## Hardware checks
 
