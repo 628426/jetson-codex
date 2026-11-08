@@ -7,6 +7,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
 
 class Logger final : public nvinfer1::ILogger {
  public:
