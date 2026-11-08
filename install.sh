@@ -209,6 +209,14 @@ else
   say "Reusing existing image: $IMAGE"
 fi
 
+# Cloud health can change during a long NVIDIA build. Verify it again
+# before recreating the running container and binding the FUSE directory.
+if [[ -f "$STORAGE_ENV" ]]; then
+  say "Rechecking cloud storage after build, before container startup."
+  bash ./storage-health.sh ||
+    fail "Cloud storage failed after build. Docker container was not replaced."
+fi
+
 # The existing container may predate support for the NVDEC/VIC/NVJPG
 # character devices. Check the explicitly mapped host paths and refresh
 # only if a required device is not listed in Docker's --device mappings.
