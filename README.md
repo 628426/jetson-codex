@@ -6,6 +6,31 @@
 
 This is an independently authored ARM64 port, **not OpenAI's official Codex Universal image**. Tool *presence* and selectable language versions are the target; exact package versions and behaviour need validation. It has **not been built or tested on your Orin**.
 
+## Quick start: Windows PowerShell (OneDrive / Google Drive login)
+
+**Use this command from Windows** when configuring cloud access on the
+headless Jetson. It runs the same installer, but forwards the browser's OAuth
+callback to the Jetson over SSH.
+
+```powershell
+ssh -tt -o ExitOnForwardFailure=yes -L 53682:127.0.0.1:53682 dex@192.168.0.80 'export RCLONE_SSH_TUNNEL=1; curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash'
+```
+
+When prompted to connect OneDrive or Google Drive, choose **Y**. Open the
+`http://127.0.0.1:53682/...` link printed by rclone in your **Windows
+browser**, approve access, and return to the terminal. No second program,
+manual token copy, or SSH session is needed.
+
+Replace `dex@192.168.0.80` with your own Jetson username and LAN IP on
+other devices. Once cloud access is linked, credentials persist.
+
+For ordinary installation or reruns from an existing **Jetson SSH terminal**
+without new cloud authorisation:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash
+```
+
 ## NVIDIA SDK: DeepStream, TensorRT, cuDNN and VPI
 
 The JetPack 7.2.0 Dockerfile starts from NVIDIA's **official Jetson DeepStream 9.1 Triton image**:
@@ -88,8 +113,8 @@ and prompts with this setting.
 not work with rclone's shared OAuth application registrations. See
 [rclone's remote setup documentation](https://rclone.org/remote_setup/).
 
-For the easiest *one-command* setup with no rclone installed on Windows,
-run this in **Windows PowerShell** instead of opening a separate SSH session:
+The full Windows PowerShell command is also at the top under **Quick start**.
+It is the preferred method when linking cloud storage from a headless Jetson:
 
 ```powershell
 ssh -tt -o ExitOnForwardFailure=yes -L 53682:127.0.0.1:53682 dex@dexson 'export RCLONE_SSH_TUNNEL=1; curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash'
@@ -201,10 +226,9 @@ needed, and runs integrated health checks. It does not create a second
 service account: the invoking user is the inspectable owner of the
 installation. Docker group access is root-equivalent.
 
-The installer does not automatically rebuild an existing image when the
-Dockerfile changes. This avoids lengthy unexpected builds, but means
-updating the Dockerfile requires an explicit image rebuild outside the
-one-command path until image revision tracking is implemented.
+The installer fingerprints the selected Dockerfile and its build inputs.
+It rebuilds when they change, using cached layers where possible, and
+reuses an existing image when the build inputs are unchanged.
 
 ## Jetson accelerator passthrough and hardware verification
 
