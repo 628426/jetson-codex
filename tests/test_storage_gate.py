@@ -48,6 +48,7 @@ with tempfile.TemporaryDirectory(prefix="storage-gate-") as tmp:
         'exit 0\n'
     )
     env = dict(os.environ, HOME=str(home), USER="dex",
+               XDG_CONFIG_HOME=str(home / ".config"),
                PATH=f"{bin_dir}:{os.environ['PATH']}")
 
     # Valid OAuth plus working service, FUSE mount and file read.
