@@ -13,12 +13,20 @@ SERVICE=jetson-codex-cloud.service
 # source only our own chmod-600 generated storage.env, not cloud content.
 load_storage() {
   # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  [[ -n "${RCLONE_REMOTE:-}" && -n "${RCLONE_SOURCE:-}" &&
-     -n "${RCLONE_MOUNT:-}" ]] || fail "Incomplete storage.env. Reconfigure storage."
-  # Never allow unmounting an arbitrary location if the local env is corrupt.
-  [[ "$RCLONE_MOUNT" == "$HOME/jetson-codex-cloud" ]] ||
-    fail "Unexpected cloud mount path. Refusing to modify: $RCLONE_MOUNT"
+  if ! source "$ENV_FILE"; then
+    say "Cannot read saved storage.env. Choose reconfiguration."
+    return 1
+  fi
+  if [[ -z "${RCLONE_REMOTE:-}" || -z "${RCLONE_SOURCE:-}" ||
+        -z "${RCLONE_MOUNT:-}" ]]; then
+    say "Saved storage.env is incomplete. Choose reconfiguration."
+    return 1
+  fi
+  # Never unmount an unexpected path, even if a saved config is corrupt.
+  if [[ "$RCLONE_MOUNT" != "$HOME/jetson-codex-cloud" ]]; then
+    say "Unexpected cloud mount path: $RCLONE_MOUNT. Choose reconfiguration."
+    return 1
+  fi
 }
 
 show_tunnel() {
@@ -37,7 +45,7 @@ show_tunnel() {
 # Cloud remote authentication and the local FUSE mount are separate checks.
 # A green systemd service alone is NOT evidence that the mount works.
 storage_healthy() {
-  load_storage
+  load_storage || return 1
   command -v rclone >/dev/null || { say "rclone is missing."; return 1; }
   command -v timeout >/dev/null || { say "timeout is missing."; return 1; }
   say "Testing remote: $RCLONE_SOURCE"
@@ -63,27 +71,33 @@ storage_healthy() {
 
 # Explicitly chosen by the user. Never rm -rf the FUSE mount or its cache.
 repair_mount() {
-  load_storage
+  load_storage || { say "Use option 3 to repair the saved cloud configuration."; return 1; }
   say "Stopping the mount service. Check that no rclone uploads are pending."
   systemctl --user stop "$SERVICE" || true
   if mountpoint -q "$RCLONE_MOUNT"; then
     # Avoid lazy-unmounting and losing pending uploads. If busy, stop safely.
-    fusermount3 -u "$RCLONE_MOUNT" ||
-      fail "Mount is busy. Close any shell/container using it, then rerun installer. Nothing deleted."
+    fusermount3 -u "$RCLONE_MOUNT" || {
+      say "Mount is busy. Close any shell/container using it and retry. No cloud files were deleted."
+      return 1
+    }
   fi
-  bash ./configure-storage.sh --mount ||
-    fail "Unable to start cloud mount. No Docker build was started."
+  bash ./configure-storage.sh --mount || {
+    say "Cloud mount did not start. Choose another recovery option."
+    return 1
+  }
 }
 
 reconnect_oauth() {
-  load_storage
+  load_storage || { say "Use option 3 to reconfigure the remote."; return 1; }
   if [[ "${RCLONE_SSH_TUNNEL:-0}" != 1 ]]; then
     show_tunnel
     return 2
   fi
   say "Renewing OAuth for existing remote $RCLONE_REMOTE (not deleting its files)."
-  bash ./configure-storage.sh --reconnect ||
-    fail "OAuth reconnection failed. No Docker build was started."
+  bash ./configure-storage.sh --reconnect || {
+    say "OAuth reconnect failed. You can retry or change remotes."
+    return 1
+  }
   # Restart only after the browser reconnect succeeds.
   repair_mount
 }
@@ -94,8 +108,10 @@ reconfigure_storage() {
     return 2
   fi
   say "Reconfiguring OneDrive/Google Drive. Existing remote files will not be deleted."
-  bash ./configure-storage.sh --reconfigure ||
-    fail "Cloud reconfiguration failed. No Docker build was started."
+  bash ./configure-storage.sh --reconfigure || {
+    say "Cloud reconfiguration failed. You can retry or cancel."
+    return 1
+  }
 }
 
 # First try a non-invasive mount activation. If remote credentials are broken,
@@ -118,9 +134,9 @@ MENU
     printf 'Choose [1-4]: ' >/dev/tty
     IFS= read -r choice </dev/tty || fail "Cloud recovery interrupted."
     case "$choice" in
-      1) repair_mount || fail "Cloud mount repair failed." ;;
-      2) reconnect_oauth || fail "Reconnect requires a working SSH OAuth tunnel." ;;
-      3) reconfigure_storage || fail "Reconfiguration requires a working SSH OAuth tunnel." ;;
+      1) repair_mount || { say "Repair unsuccessful; choose another option."; continue; } ;;
+      2) reconnect_oauth || { say "Reconnect incomplete; use Windows SSH forwarding if required."; continue; } ;;
+      3) reconfigure_storage || { say "Reconfiguration incomplete; use Windows SSH forwarding if required."; continue; } ;;
       4) fail "Cloud verification cancelled. Docker build NOT started." ;;
       *) say "Enter 1, 2, 3 or 4."; continue ;;
     esac
