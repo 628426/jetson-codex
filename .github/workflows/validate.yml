@@ -43,7 +43,10 @@ jobs:
                   assert name not in src, (file, name)
               assert src.count("rustup toolchain install") == 1, file
               assert src.count("swiftly install ") == 1, file
-              assert "snapshot" not in src, file
+              commands = "\n".join(line for line in src.splitlines()
+                                   if not line.lstrip().startswith("#"))
+              assert "snapshot" not in commands, file
+              assert 'phpenv install -s "${PHP_VERSION}"' in commands, file
           entry = Path("setup-versions.sh").read_text()
           assert "mise use" not in entry and "rustup default" not in entry
           print("Single-version toolchain policy passed")
