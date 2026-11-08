@@ -7,8 +7,6 @@ services:
       dockerfile: ${JETSON_CODEX_DOCKERFILE:-Dockerfile.jetpack-7.2.0}
       platforms: [linux/arm64]
       args:
-        INSTALL_PHP: "1"
-        INSTALL_SWIFT: "1"
         JETSON_CODEX_BUILD_HASH: ${JETSON_CODEX_BUILD_HASH:-untracked}
     platform: linux/arm64
     runtime: nvidia
