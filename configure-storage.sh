@@ -7,7 +7,9 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex"
 ENV_FILE="$CONFIG_DIR/storage.env"
 MOUNT="$HOME/jetson-codex-cloud"
 CACHE="$HOME/.cache/jetson-codex/rclone"
-mkdir -p "$CONFIG_DIR" "$CACHE" "$MOUNT"
+# OAuth reconnection must work even when the FUSE mount is stale or busy.
+# Only create the mountpoint inside install_mount(), after repair/unmount.
+mkdir -p "$CONFIG_DIR" "$CACHE"
 chmod 700 "$CONFIG_DIR" "$CACHE"
 # Run as a user systemd service, so mounts survive reboots without sudo.
 install_mount() {
