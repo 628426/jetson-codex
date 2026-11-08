@@ -70,10 +70,25 @@ jobs:
           assert "nvvideoconvert" in hw and "nvtracker" in hw
           for file in ("Dockerfile", "Dockerfile.jetpack-7.2.0"):
               src = Path(file).read_text()
-              assert "9.1-triton-multiarch" in src, file
+              assert "9.1-triton-multiarch" not in src, file
+              assert "nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04" in src, file
+              assert "nvidia-tensorrt-dev libnvvpi4 vpi4-dev" in src, file
+              assert "deepstream_sdk_v${DEEPSTREAM_VERSION}_jetson.tbz2" in src, file
               assert "tensorrt-smoke.cpp /opt/jetson-codex/" in src, file
           assert '"tensorrt-smoke.cpp"' in install
           assert '--deepstream' in install and '--tensorrt' in install
           assert "TensorRT GPU inference" in Path("verify.sh").read_text()
+          storage = Path("storage-health.sh").read_text()
+          assert "storage_healthy()" in storage
+          assert "reconnect_oauth()" in storage
+          assert "reconfigure_storage()" in storage
+          assert "mountpoint -q" in storage and 'rclone lsf' in storage
+          assert 'bash ./storage-health.sh' in install
+          assert install.index('bash ./storage-health.sh') < install.index('BUILD_INPUTS=')
+          assert 'rclone config reconnect' in Path("configure-storage.sh").read_text()
+          assert "@{" not in Path("configure-storage.sh").read_text()
+          assert "@{" not in storage
           print("Lean image and cloud pause policy passed")
           PY
+      - name: Exercise rclone OAuth/mount health gate with mocks
+        run: python3 tests/test_storage_gate.py
