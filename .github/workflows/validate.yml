@@ -37,8 +37,8 @@ jobs:
               commands = "\n".join(line for line in src.splitlines()
                                    if not line.lstrip().startswith("#"))
               assert src.count("ARG NODE_VERSION=") == 1, file
-              assert 'mise install "node${NODE_VERSION}"' in src, file
-              assert 'mise install "glab${GLAB_VERSION}"' in src, file
+              assert 'mise install "node@${NODE_VERSION}"' in src, file
+              assert 'mise install "glab@${GLAB_VERSION}"' in src, file
               assert "pipx install uv" in src and "pipx install ruff" in src
               assert "python3 -c 'import sys; assert sys.version_info[:2] == (3,12)" in src
               assert "nvvpi" in src and "libgstreamer1.0-dev" in src
