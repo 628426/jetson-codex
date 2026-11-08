@@ -19,35 +19,46 @@ jobs:
         run: python3 -m py_compile configure-full-trust.py
       - name: Validate Docker Compose configuration
         run: docker compose config --quiet
-      - name: Check single-version toolchain policy
+      - name: Enforce lean NVIDIA and Codex toolchain policy
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          names = [
-              "PYTHON_VERSION", "NODE_VERSION", "JAVA_VERSION",
-              "RUST_VERSION", "GO_VERSION", "RUBY_VERSION",
-              "PHP_VERSION", "SWIFT_VERSION", "ERLANG_VERSION",
-              "ELIXIR_VERSION", "BUN_VERSION",
-          ]
-          obsolete = [
-              "PYTHON_VERSIONS", "NODE_VERSIONS", "JAVA_VERSIONS",
-              "RUST_VERSIONS", "GO_VERSIONS", "RUBY_VERSIONS",
-              "PHP_VERSIONS", "SWIFT_VERSION_1", "SWIFT_VERSION_2",
-              "SWIFT_VERSION_3",
-          ]
+          banned_markers = (
+              "rustup", "swiftly", "phpenv", "composer",
+              "golangci-lint", "gradle@", "maven@",
+              "mise install \"ruby@", "mise install \"java@",
+              "mise install \"go@", "mise install \"bun@",
+              "mise install \"erlang@", "mise install \"elixir@",
+              "bazelisk-linux", "pipx install poetry",
+              "black mypy", "yarn@",
+          )
           for file in ("Dockerfile", "Dockerfile.jetpack-7.2.0"):
               src = Path(file).read_text()
-              for name in names:
-                  assert src.count(f"ARG {name}=") == 1, (file, name)
-              for name in obsolete:
-                  assert name not in src, (file, name)
-              assert src.count("rustup toolchain install") == 1, file
-              assert src.count("swiftly install ") == 1, file
               commands = "\n".join(line for line in src.splitlines()
                                    if not line.lstrip().startswith("#"))
-              assert "snapshot" not in commands, file
-              assert 'phpenv install -s "${PHP_VERSION}"' in commands, file
-          entry = Path("setup-versions.sh").read_text()
-          assert "mise use" not in entry and "rustup default" not in entry
-          print("Single-version toolchain policy passed")
+              assert src.count("ARG NODE_VERSION=") == 1, file
+              assert 'mise install "node${NODE_VERSION}"' in src, file
+              assert 'mise install "glab${GLAB_VERSION}"' in src, file
+              assert "pipx install uv" in src and "pipx install ruff" in src
+              assert "python3 -c 'import sys; assert sys.version_info[:2] == (3,12)" in src
+              assert "nvvpi" in src and "libgstreamer1.0-dev" in src
+              for term in banned_markers:
+                  assert term not in commands.lower(), (file, term)
+              for name in ("PYTHON_VERSION", "JAVA_VERSION", "RUST_VERSION",
+                           "GO_VERSION", "RUBY_VERSION", "PHP_VERSION",
+                           "SWIFT_VERSION", "ERLANG_VERSION", "ELIXIR_VERSION",
+                           "BUN_VERSION", "INSTALL_PHP", "INSTALL_SWIFT"):
+                  assert f"ARG {name}=" not in src, (file, name)
+          compose = Path("compose.yaml").read_text()
+          assert "INSTALL_PHP" not in compose
+          assert "INSTALL_SWIFT" not in compose
+          verify = Path("verify.sh").read_text()
+          for old in ("'Rust'", "'Ruby'", "'Java'", "'Swift'",
+                      "'PHP'", "'Erlang'", "'Elixir'", "'Go'"):
+              assert old not in verify, old
+          install = Path("install.sh").read_text()
+          assert 'Installer paused before Docker build.' in install
+          assert 'Cloud setup failed or was interrupted. Docker build NOT started.' in install
+          assert install.index('Installer paused before Docker build.') < install.index("BUILD_INPUTS=")
+          print("Lean image and cloud pause policy passed")
           PY
