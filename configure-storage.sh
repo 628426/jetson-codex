@@ -58,15 +58,15 @@ if ! command -v rclone >/dev/null 2>&1 || ! command -v fusermount3 >/dev/null 2>
 fi
 # Repair expired OAuth for an existing remote without changing its cloud root.
 # Reuses the SSH-forwarded Windows browser; never prints tokens or removes data.
-if [[ "@{1:-}" == "--reconnect" ]]; then
+if [[ "${1:-}" == "--reconnect" ]]; then
   [[ -f "$ENV_FILE" ]] || fail "No saved cloud configuration to reconnect."
-  [[ "@{RCLONE_SSH_TUNNEL:-0}" == 1 ]] ||
+  [[ "${RCLONE_SSH_TUNNEL:-0}" == 1 ]] ||
     fail "Reconnect requires SSH -L 53682:127.0.0.1:53682 from the Windows browser."
   [[ -r /dev/tty && -w /dev/tty ]] ||
     fail "An interactive terminal is required for cloud OAuth reconnect."
   # shellcheck disable=SC1090
   source "$ENV_FILE"
-  [[ -n "@{RCLONE_REMOTE:-}" ]] || fail "Storage remote missing in storage.env."
+  [[ -n "${RCLONE_REMOTE:-}" ]] || fail "Storage remote missing in storage.env."
   if ! command -v expect >/dev/null 2>&1; then
     sudo apt-get update
     sudo apt-get install -y --no-install-recommends expect
