@@ -132,7 +132,7 @@ RUN curl -fLSs "https://github.com/openai/codex/releases/${CODEX_RELEASE}/downlo
     && codex --version
 
 # Native-device utilities are installed; device access is granted at runtime.
-COPY setup-versions.sh verify.sh entrypoint.sh configure-full-trust.py codex-connect.sh hardware-check.sh /opt/jetson-codex/
+COPY setup-versions.sh verify.sh entrypoint.sh configure-full-trust.py codex-connect.sh hardware-check.sh tensorrt-smoke.cpp /opt/jetson-codex/
 RUN chmod 0755 /opt/jetson-codex/*.sh \
     && ln -sf /opt/jetson-codex/codex-connect.sh /usr/local/bin/codex-connect \
     && mkdir -p /workspace /root/.codex \
