@@ -108,26 +108,22 @@ RUN mkdir -p "${AZURE_EXTENSION_DIR}" \
     && az extension add --name azure-devops --yes \
     && az extension show --name azure-devops --query name -o tsv
 
-# Python: all versions in the upstream Codex Universal Dockerfile.
-ARG PYTHON_VERSIONS="3.10 3.11.12 3.12 3.13 3.14.0"
-RUN for v in ${PYTHON_VERSIONS}; do mise install "python@${v}"; done \
-    && mise use --global python@3.12 \
-    && for v in ${PYTHON_VERSIONS}; do \
-         mise exec "python@${v}" -- python -m ensurepip --upgrade; \
-         mise exec "python@${v}" -- python -m pip install --no-cache-dir \
-           ruff black mypy pyright isort pytest; \
-       done
+# Exactly one current stable Python runtime; Ubuntu's system Python remains for APT/az.
+ARG PYTHON_VERSION=3.15.2
+RUN mise install "python@${PYTHON_VERSION}" \
+    && mise use --global "python@${PYTHON_VERSION}" \
+    && mise exec "python@${PYTHON_VERSION}" -- python -m ensurepip --upgrade \
+    && mise exec "python@${PYTHON_VERSION}" -- python -m pip install --no-cache-dir \
+       ruff black mypy pyright isort pytest
 RUN pipx install poetry && pipx install uv && pipx install cpplint \
     && pipx install cmakelang
 
-# Node: upstream builds 18, 20, 22, 24, with formatter/linter tools.
-ARG NODE_VERSIONS="18 20 22 24"
-RUN for v in ${NODE_VERSIONS}; do \
-      mise install "node@${v}"; \
-      mise exec "node@${v}" -- npm install --global \
-        typescript eslint prettier pnpm@10.12.1 yarn@1.22.22; \
-    done \
-    && mise use --global node@22
+# One latest stable LTS Node.js; v27 remains pre-release as of Nov 2026.
+ARG NODE_VERSION=26.11.0
+RUN mise install "node@${NODE_VERSION}" \
+    && mise use --global "node@${NODE_VERSION}" \
+    && mise exec "node@${NODE_VERSION}" -- npm install --global \
+       typescript eslint prettier pnpm yarn@1.22.22
 
 # Install Codex as an actual standalone native ARM64 executable.
 # This remains callable even after changing the default Node version.
@@ -141,80 +137,74 @@ RUN curl -fLSs "https://github.com/openai/codex/releases/${CODEX_RELEASE}/downlo
     && codex --version
 
 # Bun, as used by Codex Universal.
-RUN mise install bun@1.2.14 && mise use --global bun@1.2.14
+ARG BUN_VERSION=1.4.4
+RUN mise install "bun@${BUN_VERSION}" && mise use --global "bun@${BUN_VERSION}"
 
-# Java, Gradle, Maven.  JDK 11 is intentionally excluded from the upstream
-# ARM64 version; the JDK 17/21-25 set is installed here.
-ARG JAVA_VERSIONS="25 24 23 22 21 17"
-RUN for v in ${JAVA_VERSIONS}; do mise install "java@${v}"; done \
-    && mise use --global java@21 \
-    && mise install gradle@8.14 maven@3.9.10 \
-    && mise use --global gradle@8.14 maven@3.9.10
+# Exactly one current JDK. Gradle and Maven each installed once.
+ARG JAVA_VERSION=27
+ARG GRADLE_VERSION=9.9.0
+ARG MAVEN_VERSION=3.10.0
+RUN mise install "java@${JAVA_VERSION}" \
+    && mise use --global "java@${JAVA_VERSION}" \
+    && mise install "gradle@${GRADLE_VERSION}" "maven@${MAVEN_VERSION}" \
+    && mise use --global "gradle@${GRADLE_VERSION}" "maven@${MAVEN_VERSION}"
 
-# Rust: complete upstream version matrix + rustfmt + clippy.
-ARG RUST_VERSIONS="1.95.0 1.94.0 1.93.0 1.92.0 1.91.1 1.90.0 1.89.0 1.88.0 1.87.0 1.86.0 1.85.1 1.84.1 1.83.0"
+# Exactly one stable Rust toolchain with rustfmt and Clippy.
+ARG RUST_VERSION=1.99.1
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
       | sh -s -- -y --profile minimal --default-toolchain none \
-    && for v in ${RUST_VERSIONS}; do \
-      rustup toolchain install "${v}" --profile minimal \
-        --component rustfmt --component clippy; \
-    done \
-    && rustup default 1.95.0
+    && rustup toolchain install "${RUST_VERSION}" --profile minimal \
+       --component rustfmt --component clippy \
+    && rustup default "${RUST_VERSION}"
 
-# Go and golangci-lint.
-ARG GO_VERSIONS="1.25.1 1.24.3 1.23.8 1.22.12"
-RUN for v in ${GO_VERSIONS}; do mise install "go@${v}"; done \
-    && mise use --global go@1.25.1 \
-    && mise install golangci-lint@2.1.6 \
-    && mise use --global golangci-lint@2.1.6
+# Exactly one current Go toolchain and one compatible linter.
+ARG GO_VERSION=1.27.3
+ARG GOLANGCI_LINT_VERSION=2.15.0
+RUN mise install "go@${GO_VERSION}" \
+    && mise use --global "go@${GO_VERSION}" \
+    && mise install "golangci-lint@${GOLANGCI_LINT_VERSION}" \
+    && mise use --global "golangci-lint@${GOLANGCI_LINT_VERSION}"
 
-# Ruby, Erlang, Elixir.
-ARG RUBY_VERSIONS="3.4.4 3.3.8 3.2.3"
-RUN for v in ${RUBY_VERSIONS}; do mise install "ruby@${v}"; done \
-    && mise use --global ruby@3.4.4
+# One current Ruby, Erlang/OTP and matching Elixir toolchain.
+ARG RUBY_VERSION=4.0.9
+RUN mise install "ruby@${RUBY_VERSION}" \
+    && mise use --global "ruby@${RUBY_VERSION}"
 ENV KERL_CONFIGURE_OPTIONS="--without-wx --without-javac"
-# Erlang must be activated before Elixir's installation validation runs 'erl'.
-# Keep it in its own Docker layer to preserve the expensive compilation cache.
-RUN mise install erlang@27.1.2 \
-    && mise use --global erlang@27.1.2 \
-    && mise exec erlang@27.1.2 -- erl -noshell -eval 'halt().'
-RUN mise exec erlang@27.1.2 -- mise install elixir@1.18.3-otp-27 \
-    && mise use --global elixir@1.18.3-otp-27 \
-    && mise exec erlang@27.1.2 -- elixir --version
+ARG ERLANG_VERSION=29.1.2
+ARG ELIXIR_VERSION=1.20.5-otp-29
+RUN mise install "erlang@${ERLANG_VERSION}" \
+    && mise use --global "erlang@${ERLANG_VERSION}" \
+    && mise exec "erlang@${ERLANG_VERSION}" -- erl -noshell -eval 'halt().'
+RUN mise exec "erlang@${ERLANG_VERSION}" -- mise install "elixir@${ELIXIR_VERSION}" \
+    && mise use --global "elixir@${ELIXIR_VERSION}" \
+    && mise exec "erlang@${ERLANG_VERSION}" -- elixir --version
 
 # Bazelisk / bazel. See upstream's pinned version and release naming.
-ARG BAZELISK_VERSION=v1.26.0
+ARG BAZELISK_VERSION=v1.30.0
 RUN curl -fLSs \
       "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-arm64" \
       -o /usr/local/bin/bazelisk \
     && chmod 0755 /usr/local/bin/bazelisk \
     && ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
 
-# PHP versions require compilation. This is a major part of the build time.
-# Match upstream's 'snapshot' naming; they are NOT reproducible version pins.
+# One current *stable* PHP release, not four rolling source snapshots.
 ARG INSTALL_PHP=1
-ARG PHP_VERSIONS="8.5 8.4 8.3 8.2"
+ARG PHP_VERSION=8.5.12
 RUN if [[ "${INSTALL_PHP}" == "1" ]]; then \
       git clone --depth 1 https://github.com/phpenv/phpenv.git "${PHPENV_ROOT}"; \
       git clone --depth 1 https://github.com/php-build/php-build.git \
         "${PHPENV_ROOT}/plugins/php-build"; \
-      for v in ${PHP_VERSIONS}; do \
-        MAKEFLAGS=-j2 phpenv install -s "${v}snapshot"; \
-      done; \
-      phpenv rehash; phpenv global 8.5snapshot; \
+      MAKEFLAGS=-j2 phpenv install -s "${PHP_VERSION}"; \
+      phpenv rehash; phpenv global "${PHP_VERSION}"; \
       curl -fLSs https://getcomposer.org/installer -o /tmp/composer-setup.php; \
       php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer; \
       rm /tmp/composer-setup.php; \
     fi
 
-# Swift toolchains are large on ARM64. Keep all requested versions, but
-# cache each independently and never let swiftly init download an
-# *additional* latest toolchain before the pinned versions are installed.
-# Swift 5.10.1, 6.1.x, and 6.2.x have Ubuntu 24.04 aarch64 distributions.
+# One current stable Swift toolchain for Ubuntu 24.04 / aarch64.
+# Do not let swiftly init download a second default version.
 ARG INSTALL_SWIFT=1
-ARG SWIFT_VERSION_1=5.10
-ARG SWIFT_VERSION_2=6.1
-ARG SWIFT_VERSION_3=6.2
+ARG SWIFT_VERSION=6.4.2
 RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
       curl -fLSs https://download.swift.org/swiftly/linux/swiftly-aarch64.tar.gz \
         -o /tmp/swiftly.tar.gz; \
@@ -224,39 +214,16 @@ RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
       test -f "${SWIFTLY_HOME_DIR}/env.sh"; \
       rm -rf /tmp/swiftly.tar.gz /tmp/swiftly-extract; \
     fi
-# Print storage diagnostics before any multi-GB extraction. This checks
-# Docker's writable filesystem, not a space estimate for the host root.
-# 6 GiB is conservative headroom to avoid opaque "Write failed" errors.
 RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
       source "${SWIFTLY_HOME_DIR}/env.sh"; \
-      echo "Installing Swift ${SWIFT_VERSION_1} (version 1/3)"; \
+      echo "Installing one Swift toolchain: ${SWIFT_VERSION}"; \
       df -h /tmp "${SWIFTLY_HOME_DIR}"; df -i /tmp "${SWIFTLY_HOME_DIR}"; \
       available_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"; \
       if (( available_kb < 6291456 )); then \
-        echo "ERROR: Under 6 GiB free in Docker; Swift extraction needs more headroom." >&2; exit 1; \
+        echo "ERROR: Under 6 GiB free for Swift extraction." >&2; exit 1; \
       fi; \
-      swiftly install "${SWIFT_VERSION_1}" --verbose; \
-    fi
-RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
-      source "${SWIFTLY_HOME_DIR}/env.sh"; \
-      echo "Installing Swift ${SWIFT_VERSION_2} (version 2/3)"; \
-      df -h /tmp "${SWIFTLY_HOME_DIR}"; df -i /tmp "${SWIFTLY_HOME_DIR}"; \
-      available_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"; \
-      if (( available_kb < 6291456 )); then \
-        echo "ERROR: Under 6 GiB free in Docker; Swift extraction needs more headroom." >&2; exit 1; \
-      fi; \
-      swiftly install "${SWIFT_VERSION_2}" --verbose; \
-    fi
-RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
-      source "${SWIFTLY_HOME_DIR}/env.sh"; \
-      echo "Installing Swift ${SWIFT_VERSION_3} (version 3/3)"; \
-      df -h /tmp "${SWIFTLY_HOME_DIR}"; df -i /tmp "${SWIFTLY_HOME_DIR}"; \
-      available_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"; \
-      if (( available_kb < 6291456 )); then \
-        echo "ERROR: Under 6 GiB free in Docker; Swift extraction needs more headroom." >&2; exit 1; \
-      fi; \
-      swiftly install "${SWIFT_VERSION_3}" --verbose; \
-      swiftly use "${SWIFT_VERSION_3}"; \
+      swiftly install "${SWIFT_VERSION}" --verbose; \
+      swiftly use "${SWIFT_VERSION}"; \
       swift --version; \
     fi
 
