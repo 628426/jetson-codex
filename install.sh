@@ -138,7 +138,9 @@ if true; then
   fi
 fi
 [[ -f "$DOCKERFILE" ]] || fail "Selected Dockerfile missing: $DOCKERFILE"
-mkdir -p workspace workspace/source "$HOME/jetson-codex-cloud"
+# Do not stat/mkdir the FUSE mount yet: a broken endpoint may reject mkdir
+# before storage-health.sh gets a chance to offer interactive recovery.
+mkdir -p workspace workspace/source
 # Cloud setup is a dependency when selected, not an optional best-effort task.
 # NEVER start the multi-GB Docker build while requested OAuth is incomplete.
 STORAGE_ENV="${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env"
