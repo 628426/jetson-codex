@@ -1,6 +1,6 @@
 # Jetson Codex Ultimate
 
-**Goal:** One native ARM64 developer container for Jetson Orin, with NVIDIA JetPack userland, GPU support, Codex CLI, and a single current stable version of each major language toolchain.
+**Goal:** A lean native ARM64 Jetson Codex development container with NVIDIA GPU/video SDKs, C/C++, system Python 3.12, Node.js and persistent Git/cloud connections.
 
 **Host target:** JetPack 7.2 (L4T 39.2), Ubuntu 24.04, arm64. **Base:** NVIDIA's official `nvcr.io/nvidia/deepstream:9.1-triton-multiarch` for JetPack 7.2. CUDA, TensorRT, cuDNN and DeepStream are bundled. VPI is requested as a separate package and must pass build verification.
 
@@ -127,9 +127,11 @@ The SSH connection forwards both the login page and OAuth callback to rclone
 on the Jetson. **No Windows rclone installation, token copying, or second
 terminal is needed.**
 
-The standard Jetson-side one-command installer remains supported, but
-without an SSH tunnel it must use rclone's conventional headless
-`rclone authorize` flow (requiring browser-enabled rclone elsewhere).
+The standard Jetson-side installer remains supported for already-linked
+cloud storage or when cloud storage is declined. If you request a new cloud
+connection without SSH OAuth forwarding, it **prints the Windows PowerShell
+SSH command and pauses before building Docker**. It does not continue into
+the multi-GB image build until the cloud connection is completed.
 Once linked, credentials persist on the host, so future runs do not
 require OAuth. If setup was interrupted, rerun and select an existing
 rclone remote if offered.
@@ -137,8 +139,9 @@ rclone remote if offered.
 ## Cloud-backed projects and repeatable health checks
 
 The installer can configure **OneDrive or Google Drive** as the persistent
-cloud root using `rclone config` OAuth. It asks once on an interactive
-terminal. Prerequisites on the Jetson host:
+cloud root using `rclone config` OAuth. When cloud setup is selected, it
+**pauses Docker installation until login, cloud access and the FUSE mount
+are verified**. The installer manages these minimal host prerequisites:
 
 ```bash
 sudo apt install rclone fuse3
@@ -183,17 +186,11 @@ bash ~/jetson-codex/configure-storage.sh --reconfigure
 # Reapply the mount service after changing configuration
 bash ~/jetson-codex/configure-storage.sh --mount
 
-# Check current system without rebuilding or restarting
-bash ~/jetson-codex/install.sh
-# Or via installer (read-only)
-bash ~/jetson-codex/install.sh
-
-# Force rebuild only when required
+# Run the one-command installer again to reconcile and verify setup
 bash ~/jetson-codex/install.sh
 ```
 
-Normal reruns reuse the existing image and running container. The installer validates Docker, Codex, full-trust settings, NVIDIA runtime,
-GitLab/Azure tool presence and the available connection wizard. The full SDK image and FUSE mount are **not yet tested
+Normal reruns reuse the existing image and running container when build inputs are unchanged. The installer validates Docker, Codex, full-trust settings, NVIDIA runtime, GitLab/Azure tools and the cloud mount when configured. The full SDK image and FUSE mount are **not yet tested
 on the actual Orin**.
 
 ## Automatic updates and full-trust verification
@@ -458,7 +455,7 @@ You can now ask Codex to inspect `/workspace`, compile software and run hardware
 
 Codex login persists in the `jetson-codex-auth` Docker volume. GitHub CLI and Git credential settings persist separately in `jetson-github-auth` and `jetson-git-config`. Both startup methods use the same named volumes.
 
-**Build resource warning:** each language now gets exactly **one pinned stable toolchain** instead of many historical releases. The NVIDIA/Triton base, Swift, Erlang and source-built PHP can still require substantial disk, RAM and build time on the Orin. NVMe is recommended; don't claim completion until the image builds and the on-device checks pass.
+**Build resource warning:** the heavy general-purpose toolchains were removed. The NVIDIA DeepStream/Triton base and its GPU development libraries remain large, and Docker builds still require NVMe headroom. The installer warns below the estimated storage threshold; do not claim completion until the image and on-device tests pass.
 
 ## Start, attach, stop and restart the named container
 
@@ -643,39 +640,35 @@ USB hardware, recreate the hardware container to refresh device mappings.
 
 The hardware script inspects existing `/dev/video*`, `/dev/i2c-*`, `/dev/gpiochip*`, `/dev/ttyUSB*`, and `/dev/ttyACM*` nodes, and passes each into the container. CSI camera access may also require `/tmp/argus_socket`, which is mounted only if present. Access still depends on device permissions, driver compatibility, and the specific camera interface. It does **not** grant blanket `--privileged` access. Both launch methods use the same explicitly named `jetson-codex-auth` Docker volume.
 
-## Single-version toolchains (pinned 8 November 2026)
+## Lean development image
 
-The Dockerfile was audited to install **one stable version per language**, not
-the multiple historical versions from the original `codex-universal` inventory.
-These are concrete versions, not floating build-time downloads:
+The JetPack 7.2 image is intentionally focused on AI, computer vision and
+day-to-day coding. It does **not** try to install every language from
+OpenAI's general-purpose `codex-universal` image.
 
-| Toolchain | Pinned version |
+| Included | Implementation |
 |---|---|
-| Python | 3.15.2; Ruff, Black, mypy, pyright, isort, pytest, Poetry, uv |
-| Node.js | 26.11.0; npm, pnpm, Yarn Classic, ESLint, Prettier, TypeScript |
-| Rust | 1.99.1; rustfmt, Clippy |
-| Go | 1.27.3; golangci-lint 2.15.0 |
-| Java | JDK 27; Gradle 9.9.0, Maven 3.10.0 |
-| Ruby | 4.0.9 |
-| PHP | 8.5.12 stable source release; Composer |
-| Swift | 6.4.2 on aarch64 |
-| Erlang / Elixir | OTP 29.1.2 / Elixir 1.20.5-otp-29 |
-| Bun | 1.4.4 |
-| Bazelisk | 1.30.0 |
-| Other development tools | C/C++, CUDA/TensorRT/VPI/DeepStream, Git, Git LFS, gh, glab, Azure CLI, OpenAI Codex ARM64 |
+| NVIDIA GPU / CV | DeepStream 9.1 Triton base, CUDA, cuDNN, TensorRT, VPI, NVIDIA GStreamer/NVDEC |
+| C/C++ | GCC, Clang, CMake, Ninja, GDB, formatting/linting, headers for GStreamer and V4L2 |
+| Python | Ubuntu 24.04's Python **3.12** and `pipx` |
+| Python tooling | `uv`, `ruff`; additional project dependencies installed on demand |
+| Node.js | One LTS runtime, pinned at 26.11.0, plus npm, pnpm, TypeScript, ESLint, Prettier |
+| AI agent | Standalone Codex ARM64 CLI, persistent authentication and no-approval configuration |
+| Git providers | Git, Git LFS, SSH, GitHub CLI, GitLab CLI, Azure CLI / DevOps |
 
-The base image and Ubuntu system Python may contain runtime dependencies
-independently of these explicitly installed toolchains. No additional
-language compiler versions are installed by our build instructions.
+**Removed entirely from the project's explicit installation steps:** Rust,
+Go, Ruby, Java/JDK, Gradle, Maven, Swift, PHP, Composer, Erlang, Elixir, Bun
+and Bazelisk. Also removed Python 3.15, Poetry, Black, isort, mypy, pyright,
+Yarn and redundant version managers. System or NVIDIA image dependencies may
+contain languages internally; the project does not install extra versions.
 
-The former `CODEX_ENV_*_VERSION` runtime switches are **disabled**.
-They could silently download extra versions when starting a container.
-If a project requires an older compiler, install it deliberately in an
-isolated project environment or change the Dockerfile and rebuild.
+Toolchain versions are chosen at **image build time**. The former
+`CODEX_ENV_*_VERSION` overrides are rejected rather than downloading
+extra toolchains at container startup.
 
-This makes the image significantly leaner, but does not mean the full
-ARM64 build is tested. Tool availability, runtime compatibility, and the
-actual post-build image size still require validation on `dexson`.
+The full lean ARM64 build and hardware decoder smoke tests still need
+validation on the real Orin. Do not treat the GitHub syntax checks as a
+completed NVIDIA SDK acceptance test.
 
 ## Hardware checks
 
