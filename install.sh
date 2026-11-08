@@ -140,19 +140,22 @@ if true; then
 fi
 [[ -f "$DOCKERFILE" ]] || fail "Selected Dockerfile missing: $DOCKERFILE"
 mkdir -p workspace workspace/source "$HOME/jetson-codex-cloud"
-if [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
+# Cloud setup is a dependency when selected, not an optional best-effort task.
+# NEVER start the multi-GB Docker build while requested OAuth is incomplete.
+STORAGE_ENV="${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env"
+if [[ ! -f "$STORAGE_ENV" ]]; then
   say "Cloud storage is not configured."
   if [[ -r /dev/tty && -w /dev/tty ]]; then
     printf "Configure OneDrive/Google Drive now? [y/N] " >/dev/tty
     IFS= read -r answer </dev/tty || answer=n
     if [[ "$answer" =~ ^[Yy]$ ]]; then
       if [[ "${RCLONE_SSH_TUNNEL:-0}" == "1" ]]; then
-        say "One-click OAuth tunnel detected. Starting browser linking."
-        bash ./configure-storage.sh || say "Cloud setup incomplete; rerun the installer to retry."
+        say "One-click OAuth tunnel detected. Complete the browser linking before the Docker build."
+        bash ./configure-storage.sh || fail "Cloud setup failed or was interrupted. Docker build NOT started."
+        [[ -f "$STORAGE_ENV" ]] || fail "Cloud credentials not saved. Docker build NOT started."
       else
-        # OAuth's registered redirect is localhost:53682 on the browser PC.
-        # Display the exact one-command SSH forwarding invocation rather than
-        # sending users to install rclone on Windows and paste OAuth tokens.
+        # The OAuth callback must use localhost:53682 on the browser PC.
+        # Print a complete one-command SSH forward and STOP the build here.
         server_ip=""
         if [[ -n "${SSH_CONNECTION:-}" ]]; then
           read -r _client _port server_ip _server_port <<< "$SSH_CONNECTION"
@@ -161,16 +164,29 @@ if [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
           server_ip="$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if(index($i, ".")>0 && $i ~ /^[0-9]/) {print $i; exit}}')"
         fi
         server_ip="${server_ip:-$(hostname -s)}"
-        printf '\n%s\n' 'Run this ONE command in Windows PowerShell for one-click Microsoft/Google login:' >/dev/tty
+        printf '\n%s\n' 'PAUSED: To link your cloud account, run this in Windows PowerShell:' >/dev/tty
         printf 'ssh -tt -o ExitOnForwardFailure=yes -L 53682:127.0.0.1:53682 %s@%s %s\n' "$USER" "$server_ip" "'export RCLONE_SSH_TUNNEL=1; curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash'" >/dev/tty
-        printf '%s\n\n' 'Then open the localhost link rclone prints in your Windows browser. No Windows rclone or token copying.' >/dev/tty
-        say "Cloud OAuth deferred until the browser-enabled SSH session; continuing the rest of the install."
+        printf '%s\n\n' 'Open the localhost link on your Windows PC. Docker will build after cloud login succeeds.' >/dev/tty
+        say "Installer paused before Docker build. No existing image or container was changed."
+        exit 0
       fi
+    else
+      say "Cloud storage explicitly declined. Continuing without cloud mounts."
     fi
+  else
+    say "No interactive terminal for optional cloud setup. Continuing without cloud mounts."
   fi
 fi
-if [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
-  bash ./configure-storage.sh --mount || say "Cloud mount unavailable; health check will report this."
+if [[ -f "$STORAGE_ENV" ]]; then
+  say "Confirming persistent cloud mount before building Docker."
+  bash ./configure-storage.sh --mount || fail "Cloud mounting failed; Docker build NOT started."
+  # Generated with printf %q by configure-storage.sh. Paths are always local
+  # host paths, not passed into the Codex container as OAuth credentials.
+  source "$STORAGE_ENV"
+  mountpoint -q "$RCLONE_MOUNT" || fail "Cloud FUSE mount inactive: $RCLONE_MOUNT. Docker build NOT started."
+  timeout 30 rclone lsf "$RCLONE_SOURCE" --max-depth 1 >/dev/null \
+    || fail "Cloud remote is unavailable: $RCLONE_SOURCE. Docker build NOT started."
+  say "Cloud root verified: $RCLONE_SOURCE -> $RCLONE_MOUNT"
 fi
 # The one-command installer updates changed build inputs automatically.
 # Do not rebuild for README-only changes, or on healthy no-op reruns.
