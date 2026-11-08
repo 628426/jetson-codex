@@ -190,7 +190,7 @@ if [[ -f "$STORAGE_ENV" ]]; then
 fi
 # The one-command installer updates changed build inputs automatically.
 # Do not rebuild for README-only changes, or on healthy no-op reruns.
-BUILD_INPUTS=("$DOCKERFILE" "setup-versions.sh" "verify.sh" "entrypoint.sh" "configure-full-trust.py" "codex-connect.sh" "hardware-check.sh")
+BUILD_INPUTS=("$DOCKERFILE" "setup-versions.sh" "verify.sh" "entrypoint.sh" "configure-full-trust.py" "codex-connect.sh" "hardware-check.sh" "tensorrt-smoke.cpp")
 for input in "${BUILD_INPUTS[@]}"; do
   [[ -f "$input" ]] || fail "Missing Docker build dependency: $input"
 done
@@ -286,6 +286,18 @@ hardware_health() {
   say "Running actual H.264 decode through the Jetson hardware decoder."
   docker exec "$CONTAINER" bash /opt/jetson-codex/hardware-check.sh --video \
     || fail "NVDEC test failed: check NVIDIA runtime, GStreamer plugins and driver/device compatibility."
+
+  say "Running a real DeepStream NVIDIA NVMM pipeline and checking inference plugins."
+  docker exec "$CONTAINER" bash /opt/jetson-codex/hardware-check.sh --deepstream \
+    || fail "DeepStream pipeline failed: NVIDIA GStreamer plugins, device nodes or runtime libraries may be unavailable."
+
+  # Building a TensorRT engine can take time on the 7W Orin. Run on each
+  # newly built image; on unchanged reruns, retain the fast SDK checks.
+  if (( BUILD )); then
+    say "Building a small TensorRT 10 engine and executing GPU inference."
+    docker exec "$CONTAINER" bash /opt/jetson-codex/hardware-check.sh --tensorrt \
+      || fail "TensorRT GPU inference failed: compiler, TensorRT SDK or CUDA runtime is not usable."
+  fi
 }
 
 if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
