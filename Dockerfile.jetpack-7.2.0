@@ -113,11 +113,11 @@ RUN python3 -c 'import sys; assert sys.version_info[:2] == (3,12), sys.version' 
 # One Node.js LTS runtime for front-end and full-stack work. Codex is a
 # standalone ARM64 binary and does not require Node or Rust to execute.
 ARG NODE_VERSION=26.11.0
-RUN mise install "node${NODE_VERSION}" \
-    && mise use --global "node${NODE_VERSION}" \
-    && mise exec "node${NODE_VERSION}" -- npm install --global \
+RUN mise install "node@${NODE_VERSION}" \
+    && mise use --global "node@${NODE_VERSION}" \
+    && mise exec "node@${NODE_VERSION}" -- npm install --global \
        typescript eslint prettier pnpm \
-    && mise exec "node${NODE_VERSION}" -- npm cache clean --force \
+    && mise exec "node@${NODE_VERSION}" -- npm cache clean --force \
     && node --version \
     && npm --version \
     && pnpm --version
