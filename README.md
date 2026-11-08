@@ -297,6 +297,20 @@ those inputs change, but otherwise reuses the image and persisted
 credentials. This is a source-level configuration; it has **not yet passed
 a full ARM64 build or provider OAuth test on dexson**.
 
+## Early Docker disk-space warning
+
+Before downloading or building Docker images, the installer checks free
+space on the filesystem holding Docker's configured `DockerRootDir`.
+This works even when Docker stores its layers on a different partition
+from `/`. There is no new host package.
+
+The full JetPack + multi-language container's final size is **not yet
+measured on this Jetson**. For now the installer uses a **40 GiB planning
+allowance** for image layers and toolchain extraction, and warns below
+**80 GiB available (twice that allowance)**. These values are an
+estimate, not a guarantee of sufficient space. The warning is advisory;
+it does not abort or prune images or volumes.
+
 ## One-command install or update
 
 After starting the container, the installer checks `codex login status`. If already linked, it skips login. Otherwise, when run from an interactive terminal (including `curl ... | bash` over SSH), it launches `codex login --device-auth` automatically and displays the one-time code. Open **https://auth.openai.com/codex/device** on your laptop or phone to approve. If no terminal is available or login fails, the container stays running and the installer prints a retry command. GitHub CLI authentication remains a separate, optional step.
