@@ -214,6 +214,15 @@ RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
       test -f "${SWIFTLY_HOME_DIR}/env.sh"; \
       rm -rf /tmp/swiftly.tar.gz /tmp/swiftly-extract; \
     fi
+# Swiftly checks the Debian package name gnupg2, not just availability of
+# the gpg binary from gnupg. Install inside the image before extracting Swift.
+# Keep this after the cached swiftly bootstrap layer so earlier layers survive.
+RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends gnupg2 \
+      && dpkg-query -W -f='${Status}\n' gnupg2 | grep -Fx 'install ok installed' \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
 RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
       source "${SWIFTLY_HOME_DIR}/env.sh"; \
       echo "Installing one Swift toolchain: ${SWIFT_VERSION}"; \
@@ -222,7 +231,7 @@ RUN if [[ "${INSTALL_SWIFT}" == "1" ]]; then \
       if (( available_kb < 6291456 )); then \
         echo "ERROR: Under 6 GiB free for Swift extraction." >&2; exit 1; \
       fi; \
-      swiftly install "${SWIFT_VERSION}" --verbose; \
+      swiftly install "${SWIFT_VERSION}"; \
       swiftly use "${SWIFT_VERSION}"; \
       swift --version; \
     fi
