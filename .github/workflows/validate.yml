@@ -60,5 +60,20 @@ jobs:
           assert 'Installer paused before Docker build.' in install
           assert 'Cloud setup failed or was interrupted. Docker build NOT started.' in install
           assert install.index('Installer paused before Docker build.') < install.index("BUILD_INPUTS=")
+          # NVIDIA runtime and full DeepStream experimentation must remain
+          # accessible despite the general-language slimming effort.
+          assert Path("tensorrt-smoke.cpp").exists()
+          cpp = Path("tensorrt-smoke.cpp").read_text()
+          assert "buildSerializedNetwork" in cpp and "enqueueV3" in cpp
+          hw = Path("hardware-check.sh").read_text()
+          assert "--deepstream" in hw and "--tensorrt" in hw
+          assert "nvvideoconvert" in hw and "nvtracker" in hw
+          for file in ("Dockerfile", "Dockerfile.jetpack-7.2.0"):
+              src = Path(file).read_text()
+              assert "9.1-triton-multiarch" in src, file
+              assert "tensorrt-smoke.cpp /opt/jetson-codex/" in src, file
+          assert '"tensorrt-smoke.cpp"' in install
+          assert '--deepstream' in install and '--tensorrt' in install
+          assert "TensorRT GPU inference" in Path("verify.sh").read_text()
           print("Lean image and cloud pause policy passed")
           PY
