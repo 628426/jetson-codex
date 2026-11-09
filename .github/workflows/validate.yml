@@ -73,6 +73,15 @@ jobs:
               assert "9.1-triton-multiarch" not in src, file
               assert "nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04" in src, file
               assert "nvidia-tensorrt-dev libnvvpi4 vpi4-dev" in src, file
+              # The generic CUDA repository now offers TensorRT 11.x; JetPack
+              # 7.2's NVIDIA metapackages require exactly 10.16.2.10 + CUDA 13.2.
+              assert "ARG TENSORRT_VERSION=10.16.2.10-1+cuda13.2" in src, file
+              assert "'Pin: version 10.16.2.10-1+cuda13.2'" in src, file
+              assert "'Pin-Priority: 1001'" in src, file
+              assert '"tensorrt-libs=${TENSORRT_VERSION}"' in src, file
+              assert '"tensorrt=${TENSORRT_VERSION}"' in src, file
+              assert "apt-cache policy tensorrt-libs tensorrt" in src, file
+              assert "dpkg-query -W -f='${Version}' tensorrt-libs" in src, file
               assert "deepstream_sdk_v${DEEPSTREAM_VERSION}_jetson.tbz2" in src, file
               assert "tensorrt-smoke.cpp /opt/jetson-codex/" in src, file
           assert '"tensorrt-smoke.cpp"' in install
