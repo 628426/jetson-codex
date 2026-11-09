@@ -225,6 +225,22 @@ else
   fi
 fi
 if (( BUILD )); then
+  # Free the old, very large Jetson Codex image BEFORE building its replacement.
+  # We deliberately trade rollback/uptime for NVMe headroom. Docker named auth
+  # volumes, bind-mounted Git projects and cloud data are NOT deleted.
+  if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+    old_container_image="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")"
+    [[ "$old_container_image" == "$IMAGE" ]] ||
+      fail "Container $CONTAINER belongs to $old_container_image, not $IMAGE; refusing to delete an unrelated container."
+    say "Stopping/removing old $CONTAINER container BEFORE build to free disk; all auth volumes retained."
+    docker rm -f "$CONTAINER" >/dev/null ||
+      fail "Unable to remove old $CONTAINER container safely."
+  fi
+  if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    say "Removing obsolete $IMAGE image before rebuilding to release its layers."
+    docker image rm "$IMAGE" ||
+      say "WARNING: Old image is still referenced by another container/tag and cannot be freed."
+  fi
   say "Reclaiming unused Docker storage before starting this build."
   bash ./disk-space.sh pre || say "WARNING: Pre-build Docker cleanup could not complete."
   check_docker_free_space
