@@ -42,18 +42,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     v4l-utils wget xz-utils zip zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# NVIDIA publishes JetPack 7.2 CUDA 13.2 / TensorRT 10.16 / VPI 4 for r39.2.
-# Add the *common SDK* repository in the container only, not the Jetson BSP.
-# Installing NVIDIA's nvidia-jetpack metapackage here would be wrong.
-RUN install -dm 0755 /etc/apt/keyrings \
+# JetPack 7.2 / L4T R39.2 ships TensorRT 10.16.2.10 for CUDA 13.2.
+# The CUDA base additionally configures NVIDIA's general CUDA APT repository,
+# which offers newer TensorRT 11.x for CUDA 13.4. Without pinning, APT selects
+# that release and nvidia-tensorrt's exact version dependencies cannot resolve.
+# Keep all transitive TensorRT libraries on the JetPack-matched ABI.
+ARG TENSORRT_VERSION=10.16.2.10-1+cuda13.2
+RUN install -dm 0755 /etc/apt/keyrings /etc/apt/preferences.d \
     && curl -fsSL https://repo.download.nvidia.com/jetson/jetson-ota-public.asc \
        | gpg --dearmor -o /etc/apt/keyrings/nvidia-jetson-sdk.gpg \
     && chmod 0644 /etc/apt/keyrings/nvidia-jetson-sdk.gpg \
     && printf 'deb [arch=arm64 signed-by=/etc/apt/keyrings/nvidia-jetson-sdk.gpg] https://repo.download.nvidia.com/jetson/common r39.2 main\n' \
        > /etc/apt/sources.list.d/jetson-sdk.list \
+    && printf '%s\n' \
+       'Package: tensorrt tensorrt-libs tensorrt-dev libnvinfer* libnvonnxparsers* python3-libnvinfer*' \
+       'Pin: version 10.16.2.10-1+cuda13.2' \
+       'Pin-Priority: 1001' \
+       > /etc/apt/preferences.d/jetpack72-tensorrt \
     && apt-get update \
+    && echo "JetPack 7.2 TensorRT package candidates:" \
+    && apt-cache policy tensorrt-libs tensorrt \
+    && if ! apt-cache madison tensorrt-libs | awk '{print $3}' | grep -Fx "$TENSORRT_VERSION" >/dev/null; then \
+         echo "ERROR: NVIDIA Jetson r39.2 repo is missing TensorRT $TENSORRT_VERSION" >&2; exit 1; \
+       fi \
     && apt-get install -y --no-install-recommends \
+       "tensorrt-libs=${TENSORRT_VERSION}" "tensorrt=${TENSORRT_VERSION}" \
        nvidia-tensorrt nvidia-tensorrt-dev libnvvpi4 vpi4-dev \
+    && test "$(dpkg-query -W -f='${Version}' tensorrt-libs)" = "$TENSORRT_VERSION" \
     && rm -rf /var/lib/apt/lists/* \
     && ldconfig
 
