@@ -380,22 +380,44 @@ build-headroom allowance** and warns below **48 GiB free**. This is an
 estimate, not a guarantee. The warning doesn't stop Docker or delete
 anything. Actual image size is reported when the container starts.
 
-## Automatic Docker build-cache cleanup
+## Aggressive Docker disk-space management
 
-Only **after** a new image builds, starts and passes the CUDA, TensorRT,
-DeepStream and hardware-decoding checks, the installer executes:
+The installer prioritises **free space for a successful build** over retaining
+build cache for future retries. No large RAM disk is allocated. On the 8 GB
+Orin, the existing swap/zram configuration stays untouched so CUDA compilation
+is not starved of memory.
 
-```bash
-docker buildx prune --all --force
-docker image prune --force
-docker system df
-```
+**Before a new build:** `disk-space.sh pre` prunes **all reclaimable
+BuildKit cache**, including cache from other projects using the selected
+builder, and prunes dangling images. It reports space on Docker's actual
+storage filesystem. This runs only when the image must be rebuilt.
 
-BuildKit cache and dangling/untagged old images are removed. **Active images,
-running containers, named volumes and authentication data are preserved.**
-BuildKit cache removal also affects other projects using the same builder;
-future rebuilds may be slower. This cleans old build artefacts, not the
-finished image layers.
+**During the build:** a background watcher checks free storage every
+20 seconds. Below **12 GiB available**, it immediately prunes unused
+BuildKit records (`inuse=false`) and dangling images. Actively used build
+records are protected by BuildKit. Below **3 GiB** after cleanup, it prints
+a critical warning. It cannot guarantee completion if the actual image
+and active layers exceed available disk capacity.
+
+**Inside the image:** APT lists and downloaded `.deb` packages are removed
+within their own build steps. Python pip/pipx, Node/npm and mise download
+caches are cleared in their respective layers. The DeepStream SDK archive
+is streamed straight into `tar` instead of writing an additional
+~657 MB compressed file to Docker scratch space.
+
+**After a successful build and CUDA/DeepStream/TensorRT hardware checks:**
+`disk-space.sh post` fully prunes reclaimable BuildKit cache and dangling
+images, then reports disk usage and the resulting image size.
+
+No `docker system prune --volumes`, `docker volume prune`, deletion of
+other containers or recursive removal of the cloud mount occurs. Named auth
+volumes, application data and images still used by containers are preserved.
+No automatic swap resize is attempted: disabling an active swap file would
+not reclaim its allocated disk blocks and can destabilise CUDA builds.
+
+**Trade-off:** old BuildKit cache from other projects is discarded; future
+rebuilds may need to redownload packages and recompile. The watcher itself
+does not guarantee disk space if unreclaimable layers are too large.
 
 ## One-command install or update
 
