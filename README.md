@@ -44,7 +44,16 @@ nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04
 ```
 
 Then it installs just NVIDIA's JetPack 7.2 TensorRT/VPI development packages
-and extracts `deepstream_sdk_v9.1.0_jetson.tbz2`. Downloaded archives and
+and extracts `deepstream_sdk_v9.1.0_jetson.tbz2`.
+
+**TensorRT dependency pin:** The general CUDA repository also advertises
+TensorRT 11.x for newer CUDA releases, which conflicts with JetPack 7.2's
+`nvidia-tensorrt` packages. Both Dockerfiles pin `tensorrt`,
+`tensorrt-libs` and their transitive libraries to
+`10.16.2.10-1+cuda13.2` at APT priority 1001. The build prints the
+package candidates, refuses an unavailable pinned version, and verifies
+the installed version before continuing. Do not remove this pin unless
+the JetPack/TensorRT compatibility matrix changes. Downloaded archives and
 bundled sample videos are removed **within their build layer**. The previous
 Triton Dockerfile remains as a non-default
 [rollback source](Dockerfile.jetpack-7.2.0.triton-legacy).
