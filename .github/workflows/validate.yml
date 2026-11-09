@@ -107,6 +107,10 @@ jobs:
           assert 'bash ./disk-space.sh monitor' in install
           assert 'bash ./disk-space.sh post' in install
           assert install.index('disk-space.sh pre') < install.index('docker compose --progress plain build')
+          assert install.index('docker rm -f "$CONTAINER"') < install.index('docker compose --progress plain build')
+          assert install.index('docker image rm "$IMAGE"') < install.index('docker compose --progress plain build')
+          assert "docker volume rm" not in install
+          assert "docker volume prune" not in install
           for file in ("Dockerfile", "Dockerfile.jetpack-7.2.0"):
               src = Path(file).read_text()
               assert "PIP_NO_CACHE_DIR=1" in src, file
