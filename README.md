@@ -387,10 +387,17 @@ build cache for future retries. No large RAM disk is allocated. On the 8 GB
 Orin, the existing swap/zram configuration stays untouched so CUDA compilation
 is not starved of memory.
 
-**Before a new build:** `disk-space.sh pre` prunes **all reclaimable
-BuildKit cache**, including cache from other projects using the selected
-builder, and prunes dangling images. It reports space on Docker's actual
-storage filesystem. This runs only when the image must be rebuilt.
+**Before a new build:** The installer removes the previous
+`jetson-codex` container and superseded image to reclaim their substantial
+NVMe footprint **before** constructing the replacement. Named authentication
+volumes, cloud storage and host working trees remain intact. Codex is offline
+during the rebuild; if the new build fails, there is no running old container.
+This intentionally prioritises available disk over rollback.
+
+It then runs `disk-space.sh pre` to prune **all reclaimable BuildKit
+cache**, including cache from other projects using the selected builder, and
+prunes dangling images. It reports free space on Docker's actual storage
+filesystem. This runs only when the image must be rebuilt.
 
 **During the build:** a background watcher checks free storage every
 20 seconds. Below **12 GiB available**, it immediately prunes unused
