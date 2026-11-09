@@ -15,7 +15,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIPX_BIN_DIR=/usr/local/bin \
     PIPX_HOME=/opt/pipx \
     MISE_TRUSTED_CONFIG_PATHS=/root/.config/mise \
-    UV_NO_PROGRESS=1
+    UV_NO_PROGRESS=1 \
+    PIP_NO_CACHE_DIR=1
 ENV PATH="/opt/nvidia/deepstream/deepstream-9.1/bin:/root/.local/share/mise/shims:/root/.local/bin:/usr/local/cuda/bin:${PATH}"
 ENV GST_PLUGIN_PATH="/opt/nvidia/deepstream/deepstream-9.1/lib/gst-plugins"
 ENV LD_LIBRARY_PATH="/opt/nvidia/deepstream/deepstream-9.1/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
@@ -40,7 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps protobuf-compiler python3-dev python3-pip python3-venv \
     ripgrep rsync sqlite3 sudo swig tmux tzdata unzip usbutils \
     v4l-utils wget xz-utils zip zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 
 # JetPack 7.2 / L4T R39.2 ships TensorRT 10.16.2.10 for CUDA 13.2.
 # The CUDA base additionally configures NVIDIA's general CUDA APT repository,
@@ -69,7 +70,7 @@ RUN install -dm 0755 /etc/apt/keyrings /etc/apt/preferences.d \
        "tensorrt-libs=${TENSORRT_VERSION}" "tensorrt=${TENSORRT_VERSION}" \
        nvidia-tensorrt nvidia-tensorrt-dev libnvvpi4 vpi4-dev \
     && test "$(dpkg-query -W -f='${Version}' tensorrt-libs)" = "$TENSORRT_VERSION" \
-    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb \
     && ldconfig
 
 # NVIDIA's official standalone Jetson SDK includes the DeepStream framework,
@@ -78,11 +79,11 @@ RUN install -dm 0755 /etc/apt/keyrings /etc/apt/preferences.d \
 # Remove bundled demonstration videos after SDK installation. Model configs,
 # application binaries and development headers remain. RTSP inputs work normally.
 ARG DEEPSTREAM_VERSION=9.1.0
+# Stream the ~657 MB DeepStream archive to tar: never write the downloaded
+# archive to Docker scratch storage. pipefail catches a truncated transfer.
 RUN curl -fLSs --retry 3 \
       "https://github.com/NVIDIA/DeepStream/releases/download/v9.1.0/deepstream_sdk_v${DEEPSTREAM_VERSION}_jetson.tbz2" \
-      -o /tmp/deepstream-sdk.tbz2 \
-    && tar -xjf /tmp/deepstream-sdk.tbz2 -C / \
-    && rm -f /tmp/deepstream-sdk.tbz2 \
+    | tar -xjf - -C / \
     && test -x /opt/nvidia/deepstream/deepstream-9.1/install.sh \
     && /opt/nvidia/deepstream/deepstream-9.1/install.sh \
     && rm -rf /opt/nvidia/deepstream/deepstream-9.1/samples/streams \
@@ -97,7 +98,9 @@ RUN for pkg in cuda-compat-13-2 cuda-compat-orin-13-2; do \
       if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -Fxq 'install ok installed'; then \
         apt-get purge -y "$pkg"; \
       fi; \
-    done
+    done \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 
 # DeepStream 9.1 is coupled to JetPack 7.2's CUDA 13.2/TensorRT 10.16.
 # Run real inference/decoding tests on dexson after Docker startup; a
@@ -123,7 +126,7 @@ RUN install -dm 0755 /etc/apt/keyrings \
       > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends gh \
-    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb \
     && gh --version
 
 # mise handles multiple versions of runtimes, with persistent shims in PATH.
@@ -136,7 +139,8 @@ RUN mise --version
 ARG GLAB_VERSION=1.128.0
 RUN mise install "glab@${GLAB_VERSION}" \
     && mise use --global "glab@${GLAB_VERSION}" \
-    && glab --version
+    && glab --version \
+    && rm -rf /root/.cache/mise
 
 # Azure DevOps CLI for Azure DevOps Services (not on-prem DevOps Server).
 # Official Microsoft Ubuntu Noble ARM64 APT repository.
@@ -148,12 +152,13 @@ RUN install -dm 0755 /etc/apt/keyrings \
       > /etc/apt/sources.list.d/azure-cli.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends azure-cli \
-    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb \
     && az --version
 ENV AZURE_EXTENSION_DIR=/opt/azure-cli-extensions
 RUN mkdir -p "${AZURE_EXTENSION_DIR}" \
     && az extension add --name azure-devops --yes \
-    && az extension show --name azure-devops --query name -o tsv
+    && az extension show --name azure-devops --query name -o tsv \
+    && rm -rf /root/.cache/pip /root/.cache/azure
 
 # Use Ubuntu 24.04's system Python 3.12. NVIDIA/DeepStream Python wheels may
 # rely on the distro ABI; no separate mise Python toolchains are installed.
@@ -162,7 +167,8 @@ RUN python3 -c 'import sys; assert sys.version_info[:2] == (3,12), sys.version' 
     && pipx install uv \
     && pipx install ruff \
     && uv --version \
-    && ruff --version
+    && ruff --version \
+    && rm -rf /root/.cache/pip /root/.cache/pipx
 
 # One Node.js LTS runtime for front-end and full-stack work. Codex is a
 # standalone ARM64 binary and does not require Node or Rust to execute.
@@ -174,7 +180,8 @@ RUN mise install "node@${NODE_VERSION}" \
     && mise exec "node@${NODE_VERSION}" -- npm cache clean --force \
     && node --version \
     && npm --version \
-    && pnpm --version
+    && pnpm --version \
+    && rm -rf /root/.cache/mise /root/.cache/npm
 
 # Standalone native ARM64 Codex executable (not an npm or Rust build).
 ARG CODEX_RELEASE=latest
