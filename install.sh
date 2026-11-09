@@ -16,6 +16,27 @@ NEED_NVIDIA_RUNTIME=0
 say() { printf '[jetson-codex] %s\n' "$*"; }
 fail() { printf '[jetson-codex] ERROR: %s\n' "$*" >&2; exit 1; }
 
+DISK_MONITOR_PID=""
+INSTALL_TMP_DIR=""
+stop_disk_monitor() {
+  if [[ -n "$DISK_MONITOR_PID" ]]; then
+    kill "$DISK_MONITOR_PID" 2>/dev/null || true
+    wait "$DISK_MONITOR_PID" 2>/dev/null || true
+    DISK_MONITOR_PID=""
+  fi
+}
+cleanup_install() {
+  stop_disk_monitor
+  if [[ -n "$INSTALL_TMP_DIR" && -d "$INSTALL_TMP_DIR" ]]; then
+    rm -rf -- "$INSTALL_TMP_DIR"
+  fi
+}
+trap cleanup_install EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+
 (( $# == 0 )) || fail "No parameters supported. Run install.sh without arguments."
 [[ $EUID -ne 0 ]] || fail "Run as your normal account, not sudo."
 [[ "$(uname -s)" == "Linux" ]] || fail "Linux is required."
@@ -137,7 +158,11 @@ if true; then
     sudo systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
   fi
 fi
+# Reclaim safe host-side APT package downloads from bootstrap. Never remove
+# system packages, user files, zram or swap while the 8GB Jetson is compiling.
+sudo apt-get clean || say "WARNING: Host APT cache cleanup failed."
 [[ -f "$DOCKERFILE" ]] || fail "Selected Dockerfile missing: $DOCKERFILE"
+INSTALL_TMP_DIR="$(mktemp -d -t jetson-codex-install.XXXXXXXX)"
 # Do not stat/mkdir the FUSE mount yet: a broken endpoint may reject mkdir
 # before storage-health.sh gets a chance to offer interactive recovery.
 mkdir -p workspace workspace/source
@@ -200,10 +225,17 @@ else
   fi
 fi
 if (( BUILD )); then
-  say "Building full ARM64 JetPack + Codex image; this is a large build."
+  say "Reclaiming unused Docker storage before starting this build."
+  bash ./disk-space.sh pre || say "WARNING: Pre-build Docker cleanup could not complete."
+  check_docker_free_space
+  say "Building ARM64 CUDA/TensorRT/DeepStream + Codex with live disk monitoring."
+  bash ./disk-space.sh monitor "$BASHPID" &
+  DISK_MONITOR_PID=$!
   if ! docker compose --progress plain build; then
-    fail "Docker build failed. Check the output above and README troubleshooting; the existing container was not changed."
+    stop_disk_monitor
+    fail "Docker build failed. Check the output above; existing containers and volumes were not deleted."
   fi
+  stop_disk_monitor
 else
   docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "--no-build requested, but $IMAGE is missing."
   say "Reusing existing image: $IMAGE"
@@ -230,9 +262,9 @@ explicit_devices_current() {
 
 hardware_health() {
   local hostlist dockerlist missingfile hostcount dockercount host_cuda docker_cuda
-  hostlist="$(mktemp)"
-  dockerlist="$(mktemp)"
-  missingfile="$(mktemp)"
+  hostlist="$INSTALL_TMP_DIR/host-devices.txt"
+  dockerlist="$INSTALL_TMP_DIR/container-devices.txt"
+  missingfile="$INSTALL_TMP_DIR/missing-devices.txt"
   say "Checking Jetson hardware on HOST (no host SDK packages needed)."
   bash ./hardware-check.sh --devices > "$hostlist"
   hostcount="$(wc -l < "$hostlist")"
@@ -339,21 +371,11 @@ fi
 # Verify NVIDIA devices and execute a real NVDEC decode on every rerun.
 hardware_health
 
-# Prune BuildKit cache only AFTER successful container startup AND NVIDIA
-# runtime acceptance tests. A failing GPU test retains expensive build cache
-# so an iterative fix does not require downloading/rebuilding from scratch.
+# Reclaim all eligible cache as soon as hardware acceptance completes.
+# A failed install also receives EXIT-trap scratch cleanup, and the monitor
+# prunes during the build if Docker storage drops below its free-space target.
 if (( BUILD )); then
-  say "New image passed hardware checks; reclaiming unused Docker build cache."
-  if docker buildx prune --all --force; then
-    say "Docker build cache cleanup completed."
-  else
-    say "WARNING: Build cache cleanup failed; running container is unaffected."
-  fi
-  # Old untagged revisions of jetson-codex would otherwise occupy many GiB.
-  # Dangling-image prune never deletes the active image or named volumes.
-  docker image prune --force ||
-    say "WARNING: Dangling image cleanup failed; running container is unaffected."
-  docker system df || true
+  bash ./disk-space.sh post || say "WARNING: Post-build Docker cleanup failed."
 fi
 
 image_bytes="$(docker image inspect --format '{{.Size}}' "$IMAGE" 2>/dev/null || true)"
