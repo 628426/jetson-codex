@@ -97,7 +97,25 @@ jobs:
           assert 'rclone config reconnect' in Path("configure-storage.sh").read_text()
           assert "@{" not in Path("configure-storage.sh").read_text()
           assert "@{" not in storage
+          # Disk pressure is handled before, during and after the build.
+          disk = Path("disk-space.sh").read_text()
+          assert "buildx prune --all --force" in disk
+          assert "inuse=false" in disk
+          assert "volume prune" not in disk
+          assert "system prune" not in disk
+          assert 'bash ./disk-space.sh pre' in install
+          assert 'bash ./disk-space.sh monitor' in install
+          assert 'bash ./disk-space.sh post' in install
+          assert install.index('disk-space.sh pre') < install.index('docker compose --progress plain build')
+          for file in ("Dockerfile", "Dockerfile.jetpack-7.2.0"):
+              src = Path(file).read_text()
+              assert "PIP_NO_CACHE_DIR=1" in src, file
+              assert "tar -xjf - -C /" in src, file
+              assert "apt-get clean" in src, file
+              assert "rm -rf /root/.cache/mise" in src, file
           print("Lean image and cloud pause policy passed")
           PY
       - name: Exercise rclone OAuth/mount health gate with mocks
         run: python3 tests/test_storage_gate.py
+      - name: Exercise disk-pressure cleanup with mocked Docker
+        run: python3 tests/test_disk_space.py
