@@ -47,6 +47,11 @@ with tempfile.TemporaryDirectory(prefix="storage-gate-") as tmp:
         'if [ "${MOCK_MOUNT_DOWN:-0}" = "1" ]; then exit 19; fi\n'
         'exit 0\n'
     )
+    executable(
+        bin_dir / "sudo",
+        'if [ "${MOCK_DOCKER_ROOT_DENIED:-0}" = "1" ]; then exit 13; fi\n'
+        'exit 0\n'
+    )
     env = dict(os.environ, HOME=str(home), USER="dex",
                XDG_CONFIG_HOME=str(home / ".config"),
                PATH=f"{bin_dir}:{os.environ['PATH']}")
@@ -67,6 +72,12 @@ with tempfile.TemporaryDirectory(prefix="storage-gate-") as tmp:
     absent = run_gate(dict(env, MOCK_MOUNT_DOWN="1"))
     assert absent.returncode != 0
     assert "Cloud folder is not actually mounted" in absent.stdout
+
+    # FUSE can work for dex but not Docker's root daemon: block startup.
+    root_denied = run_gate(dict(env, MOCK_DOCKER_ROOT_DENIED="1"))
+    assert root_denied.returncode != 0
+    assert "Docker's root user cannot read" in root_denied.stdout
+    assert "PAUSED before Docker build" in root_denied.stdout
 
     # Broken saved configuration must be recoverable, not silently ignored.
     env_file.write_text("RCLONE_REMOTE=cloud\n")
