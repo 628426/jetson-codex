@@ -26,7 +26,13 @@ services:
       GIT_CONFIG_GLOBAL: /root/.config/git/config
     volumes:
       - ./workspace:/workspace
-      - ${HOME}/jetson-codex-cloud:/workspace/projects:rslave
+      # Do not let Docker mkdir the source of a real FUSE filesystem.
+      - type: bind
+        source: ${HOME}/jetson-codex-cloud
+        target: /workspace/projects
+        bind:
+          create_host_path: false
+          propagation: rslave
       - ./workspace/source:/workspace/source
       - codex-auth:/root/.codex
       - github-auth:/root/.config/gh
