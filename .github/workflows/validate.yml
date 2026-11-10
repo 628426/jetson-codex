@@ -96,6 +96,18 @@ jobs:
           assert install.index('bash ./storage-health.sh') < install.index('BUILD_INPUTS=')
           assert 'rclone config reconnect' in Path("configure-storage.sh").read_text()
           assert "@{" not in Path("configure-storage.sh").read_text()
+          cloud_mount = Path("cloud-mount.sh").read_text()
+          assert "--allow-root" in cloud_mount
+          assert "user_allow_other" in Path("configure-storage.sh").read_text()
+          assert "sudo timeout 15 ls -A" in storage
+          launch = Path("run-hardware.sh").read_text()
+          assert 'type=bind,source=$cloud_mount,target=/workspace/projects,bind-propagation=rslave' in launch
+          assert 'mkdir -p workspace workspace/source "$HOME/jetson-codex-cloud"' not in launch
+          assert 'docker rm -f jetson-codex' in launch
+          assert "Docker cannot list /workspace/projects" in launch
+          compose = Path("compose.yaml").read_text()
+          assert "create_host_path: false" in compose
+          assert "propagation: rslave" in compose
           assert "@{" not in storage
           # Disk pressure is handled before, during and after the build.
           disk = Path("disk-space.sh").read_text()
