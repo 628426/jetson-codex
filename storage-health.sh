@@ -66,7 +66,15 @@ storage_healthy() {
     say "Cloud mount cannot list files (possibly a stale FUSE endpoint)."
     return 1
   fi
-  say "PASS: remote OAuth/access, service, FUSE mount and directory listing."
+  # A successful dex listing is not enough: the Docker daemon is root.
+  # Without rclone --allow-root, Docker's -v can misread the FUSE directory
+  # as missing and fail with 'mkdir ... file exists'.
+  if ! sudo timeout 15 ls -A "$RCLONE_MOUNT" >/dev/null 2>&1; then
+    say "Docker's root user cannot read the rclone FUSE mount."
+    say "Choose repair option 1 to apply --allow-root and restart this mount."
+    return 1
+  fi
+  say "PASS: remote OAuth/access, service, FUSE, user and Docker-root listing."
 }
 
 # Explicitly chosen by the user. Never rm -rf the FUSE mount or its cache.
@@ -126,7 +134,7 @@ if ! storage_healthy; then
     cat >/dev/tty <<'MENU'
 
 Cloud storage failed verification. Docker build is PAUSED.
-  1) Retry connection / restart FUSE mount
+  1) Repair FUSE/Docker access and restart mount (check pending uploads)
   2) Reconnect OAuth for the existing OneDrive/Google remote
   3) Reconfigure cloud provider, remote or project folder
   4) Abort (leave Docker and cloud data untouched)
