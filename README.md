@@ -167,17 +167,36 @@ require OAuth.
 
 ### Rclone health checks and interactive recovery
 
-Every installer run with existing cloud configuration checks **both**
-`rclone lsf` against the cloud project root **and** a real directory listing
-through the FUSE mount. It also checks the user systemd service and
-`mountpoint`; an active service alone is not considered healthy.
+Every installer run with existing cloud configuration checks
+`rclone lsf` against the remote, the systemd user service, the FUSE
+`mountpoint`, and **actual directory listings both as the invoking user and
+as root**. The last check matters: Docker's daemon runs as root, and an
+ordinary user-only FUSE mount can appear healthy to `dex` but fail with
+`mkdir /home/dex/jetson-codex-cloud: file exists` on Docker startup.
+
+The host cloud service uses rclone `--allow-root`, **not**
+`--allow-other`, so only the mounting user and root can access cloud
+content. `configure-storage.sh` idempotently adds `user_allow_other` to
+`/etc/fuse.conf`, as required by libfuse for a non-root user to request
+this access. This changes the host's FUSE permission policy but does not
+expose cloud data to unrelated local users.
+
+The hardware launcher uses Docker's **explicit `--mount type=bind`** and
+never tries to `mkdir` an existing FUSE mountpoint. Docker Compose uses
+`bind.create_host_path: false`. A failed container creation is cleaned up
+without deleting Docker volumes or images.
 
 If any check fails, installation **pauses before building Docker** and asks:
 
-1. Retry or restart the FUSE mount.
+1. Repair FUSE/Docker access and restart the cloud mount.
 2. Reconnect the existing OneDrive/Google Drive OAuth token in your browser.
 3. Reconfigure the remote or cloud project folder.
 4. Abort without changing the Docker container.
+
+The first rerun after this change may detect that the existing rclone
+mount was started **without** `--allow-root`. Choose **1** to restart it
+with the corrected permissions. Do this after pending cloud uploads
+complete; nothing requires rebuilding the existing CUDA/TensorRT image.
 
 Options 2 and 3 require the Windows SSH redirect (shown above). Without it,
 the installer prints the exact PowerShell command instead of proceeding.
