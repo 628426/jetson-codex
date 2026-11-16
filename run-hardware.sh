@@ -27,6 +27,10 @@ if docker container inspect "$container" >/dev/null 2>&1; then
     echo "Existing container lacks /opt/jetson-codex bind mount; manual migration required." >&2
     exit 1
   fi
+  if ! docker inspect --format '{{range .Mounts}}{{println .Destination}}{{end}}' "$container" | grep -Fxq /cloud; then
+    echo "Existing container lacks /cloud bind mount. Refusing to recreate its installed packages; manual migration required." >&2
+    exit 1
+  fi
   if [[ "$(docker inspect --format '{{.State.Running}}' "$container")" == true ]]; then
     echo "Container '$container' already running; preserving installed filesystem."
   else
@@ -41,6 +45,7 @@ args=(run -d --name "$container" --restart unless-stopped
       --mount "type=bind,source=$PWD,target=/opt/jetson-codex,readonly"
       --mount "type=bind,source=$PWD/workspace,target=/workspace"
       --mount "type=bind,source=$PWD/workspace/source,target=/workspace/source"
+      --mount "type=bind,source=$cloud_mount,target=/cloud,bind-propagation=rslave"
       --mount "type=bind,source=$cloud_mount,target=/workspace/projects,bind-propagation=rslave"
       -v jetson-codex-auth:/root/.codex
       -v jetson-github-auth:/root/.config/gh
@@ -68,8 +73,11 @@ docker "${args[@]}" || {
   exit 1
 }
 if [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then
+  docker exec "$container" timeout 20 ls -A /cloud >/dev/null || {
+    echo "Container cannot read /cloud FUSE mount." >&2; exit 1;
+  }
   docker exec "$container" timeout 20 ls -A /workspace/projects >/dev/null || {
-    echo "Container cannot read cloud project mount." >&2; exit 1;
+    echo "Container cannot read compatibility project mount." >&2; exit 1;
   }
 fi
 echo "Container '$container' started; post-up provisioning can begin."
