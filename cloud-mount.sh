@@ -6,11 +6,15 @@ config="${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env"
 # shellcheck disable=SC1090
 source "$config"
 # Docker's root-owned daemon must be able to traverse this user FUSE mount.
-# --allow-root grants only the mounting user and root access; do not use the
-# broader --allow-other mode. configure-storage.sh enables user_allow_other in
-# /etc/fuse.conf, as required for non-root FUSE mounts using this option.
+# The installed rclone FUSE backend ignores --allow-root. --allow-other lets
+# Docker's root user traverse this mount, while kernel-enforced 0700/0600
+# permissions keep other unprivileged host users out. configure-storage.sh
+# enables user_allow_other in /etc/fuse.conf for this option.
 exec rclone mount "$RCLONE_SOURCE" "$RCLONE_MOUNT" \
-  --allow-root \
+  --allow-other \
+  --default-permissions \
+  --dir-perms 0700 \
+  --file-perms 0600 \
   --vfs-cache-mode full \
   --vfs-cache-max-size 2G \
   --vfs-cache-max-age 1h \
