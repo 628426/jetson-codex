@@ -292,11 +292,22 @@ if docker image inspect "$IMAGE" >/dev/null 2>&1; then
   installed_hash="$(docker image inspect --format '{{index .Config.Labels "org.jetson-codex.build-hash"}}' "$IMAGE" 2>/dev/null || true)"
   if [[ "$installed_hash" != "$JETSON_CODEX_BUILD_HASH" ]]; then
     if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
-      if [[ "${JETSON_CODEX_MIGRATE:-0}" != 1 ]]; then
-        fail "Base image changed, but the existing container holds post-installed packages. Refusing to recreate it. Explicit JETSON_CODEX_MIGRATE=1 required."
+      existing_state="$(docker inspect --format '{{.State.Status}}' "$CONTAINER")"
+      first_start="$(docker inspect --format '{{.State.StartedAt}}' "$CONTAINER")"
+      current_image="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")"
+      # "Created" with the zero StartedAt timestamp has NEVER executed PID 1,
+      # so there are no post-installed SDK changes to preserve. Only this
+      # strictly verified case may be removed automatically on base repair.
+      if [[ "$current_image" == "$IMAGE" && "$existing_state" == created &&
+            "$first_start" == 0001-01-01T00:00:00Z ]]; then
+        say "Removing never-started Created container to repair minimal CUDA base; named volumes retained."
+        docker rm "$CONTAINER" >/dev/null || fail "Cannot remove never-started container."
+      elif [[ "${JETSON_CODEX_MIGRATE:-0}" == 1 ]]; then
+        say "Explicit base replacement requested. Discarding container writable layer; named volumes survive."
+        docker rm -f "$CONTAINER" >/dev/null || fail "Cannot remove old base container."
+      else
+        fail "Base image changed, but the container may have post-installed packages. Refusing to recreate it. Explicit JETSON_CODEX_MIGRATE=1 required."
       fi
-      say "Explicit base replacement requested. Discarding container writable layer; named volumes survive."
-      docker rm -f "$CONTAINER" >/dev/null || fail "Cannot remove old base container."
     fi
     docker image rm "$IMAGE" >/dev/null || fail "Cannot replace incompatible base image."
     BUILD=1
@@ -308,7 +319,7 @@ else
 fi
 
 if (( BUILD )); then
-  say "Building minimal CUDA base (no APT or SDK provisioning in Dockerfile)."
+  say "Building minimal CUDA base (only lightweight cuda-compat removal; SDK provisioning is post-start)."
   bash ./disk-space.sh pre || say "WARNING: Pre-base cache cleanup failed."
   bash ./disk-space.sh monitor "$BASHPID" &
   DISK_MONITOR_PID=$!
