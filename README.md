@@ -281,51 +281,51 @@ not an end-to-end Codex agent command execution test.
 
 ## Completely uninstall and retest
 
-Use the **single installer flag** \`--uninstall\`. This is intentionally
+Use the **single installer flag** `--uninstall`. This is intentionally
 destructive: it removes the persistent container and post-installed SDK,
-both \`jetson-codex\` image tags, all six credential volumes, local rclone
+both `jetson-codex` image tags, all six credential volumes, local rclone
 cache, the cloud-mount user service, and the entire verified local checkout
-**including \`workspace/source\`**. It also clears shared BuildKit cache
+**including `workspace/source`**. It also clears shared BuildKit cache
 (including cache owned by *other* Docker projects).
 
 On dexson:
 
-\`\`\`bash
+```bash
 bash ~/jetson-codex/install.sh --uninstall
-\`\`\`
+```
 
 Or when the checkout is missing, using the same installer from GitHub:
 
-\`\`\`bash
+```bash
 curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --uninstall
-\`\`\`
+```
 
 From Windows PowerShell:
 
-\`\`\`powershell
+```powershell
 ssh -tt dex@192.168.0.80 'curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash -s -- --uninstall'
-\`\`\`
+```
 
 **Confirmation is required.** Read the scope, make sure any rclone VFS
-uploads are finished, and type exactly \`ERASE jetson-codex\`. If the
+uploads are finished, and type exactly `ERASE jetson-codex`. If the
 confirmation is missing or the checkout/container belongs to another
 project, the command refuses to proceed. A partially completed uninstall
 can be rerun safely.
 
-**Never deletes cloud files.** Shared \`~/.config/rclone/rclone.conf\`,
-\`/etc/fuse.conf\`, Docker/NVIDIA runtime installation and host unattended
+**Never deletes cloud files.** Shared `~/.config/rclone/rclone.conf`,
+`/etc/fuse.conf`, Docker/NVIDIA runtime installation and host unattended
 security updates remain. The rclone remote itself may be reused by other
 tools. A subsequent installation can reuse its saved OAuth grant.
 
 To reinstall from scratch:
 
-\`\`\`bash
+```bash
 curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash
-\`\`\`
+```
 
 The new container starts from the minimal CUDA base, provisions the full SDK
 inside its persistent writable filesystem, then offers ChatGPT pairing after
-Codex sign-in. Do not use \`docker compose down\` as a reset: it would remove
+Codex sign-in. Do not use `docker compose down` as a reset: it would remove
 the SDK filesystem without cleaning up associated credentials/configuration.
 
 ## One command, every time
@@ -495,23 +495,23 @@ After starting the container, the installer checks `codex login status`. If alre
 ### Pair the Jetson Codex CLI to ChatGPT mobile
 
 Remote Control needs the **complete installer-managed Codex package**, not
-a lone \`codex\` binary. The provisioner now installs that official package
+a lone `codex` binary. The provisioner now installs that official package
 inside the existing persistent container using
-\`https://chatgpt.com/codex/install.sh\`. Its files are stored under
-\`/root/.codex/packages/standalone\` in the existing Docker auth volume.
+`https://chatgpt.com/codex/install.sh`. Its files are stored under
+`/root/.codex/packages/standalone` in the existing Docker auth volume.
 
 After device sign-in, the installer checks Remote Control and offers to
 generate a mobile pairing code. To retry or get a fresh code later:
 
-\`\`\`bash
+```bash
 bash ~/jetson-codex/codex-remote.sh pair
-\`\`\`
+```
 
 Open ChatGPT on your phone, visit Codex/Remote and follow the pairing
 prompt. Remote Control is not host SSH and does **not** require a Codex
 executable on the Jetson host. Pairing codes are displayed directly in the
 terminal, never saved to a file or logged. The pairing prompt is shown
-only once during automatic setup; \`pair\` can be repeated explicitly.
+only once during automatic setup; `pair` can be repeated explicitly.
 
 The installer does not silently recreate the container or force a new
 image when pairing fails. The native daemon is started again on Docker
