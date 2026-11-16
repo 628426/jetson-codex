@@ -60,6 +60,18 @@ jobs:
           assert "Cloud setup failed or was interrupted. Docker build NOT started." in install
           assert install.index("bash ./storage-health.sh") < install.index("BUILD_INPUTS=") if "BUILD_INPUTS=" in install else True
           assert "provision-container.sh" in install
+          assert 'bash ./check-nvidia-toolkit.sh' in install
+          assert install.index('bash ./check-nvidia-toolkit.sh') < install.index('bash ./run-hardware.sh')
+          toolkit = Path("check-nvidia-toolkit.sh").read_text()
+          assert "minimum=1.19.1" in toolkit
+          assert "nvidia-container-toolkit-base" in toolkit
+          assert "libnvidia-container-tools" in toolkit
+          assert "libnvidia-container1" in toolkit
+          assert "apt-get -s --no-install-recommends" in toolkit
+          assert "Refusing NVIDIA toolkit update" in toolkit
+          assert "sudo apt-get install -y --no-install-recommends" in toolkit
+          assert "sudo apt-get upgrade" not in toolkit
+          assert "nvidia-jetpack" not in toolkit
           assert "JETSON_CODEX_MIGRATE" in install
           assert "docker compose --progress plain build" in install
           assert install.index('bash ./run-hardware.sh') < install.index('bash /opt/jetson-codex/provision-container.sh')
@@ -151,3 +163,6 @@ jobs:
         run: python3 tests/test_codex_remote.py
       - name: Exercise complete uninstall with mocked services
         run: python3 tests/test_uninstall.py
+
+      - name: Test Orin CUDA compat host toolkit recovery (mock APT)
+        run: python3 tests/test_nvidia_toolkit.py
