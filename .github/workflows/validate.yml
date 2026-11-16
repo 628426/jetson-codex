@@ -43,7 +43,11 @@ jobs:
           assert "glab@1.128.0" in provision
           assert "node@26.11.0" in provision
           assert "curl -fLSs" in provision and "tar -xjf - -C /" in provision
-          assert "codex-aarch64-unknown-linux-musl" in provision
+          assert "https://chatgpt.com/codex/install.sh" in provision
+          assert "CODEX_NON_INTERACTIVE=1 CODEX_INSTALL_DIR=/usr/local/bin" in provision
+          assert "managed_codex_ready" in provision
+          assert "packages/standalone/current/bin/codex" in provision
+          assert "codex-aarch64-unknown-linux-musl.tar.gz" not in provision
           assert "apt-get clean" in provision
           assert "provision.sha256" in provision
           assert 'bash /opt/jetson-codex/setup-versions.sh' in provision
