@@ -64,6 +64,10 @@ fi
 # CUDA base has the generic CUDA APT feed (which can offer incompatible TRT
 # 11). Pin the entire JetPack 7.2 TensorRT family to CUDA 13.2.
 trt_version='10.16.2.10-1+cuda13.2'
+if [[ "$(dpkg-query -W -f='${Version}' tensorrt-libs 2>/dev/null || true)" == "$trt_version" ]] \
+  && dpkg-query -W -f='${Status}' nvidia-tensorrt-dev libnvvpi4 vpi4-dev 2>/dev/null | grep -cFx 'install ok installed' | grep -Fxq 3; then
+  log "TensorRT $trt_version and VPI 4 already installed; skipping APT."
+else
 log "Installing NVIDIA JetPack-matched TensorRT $trt_version and VPI 4."
 install -dm 0755 /etc/apt/keyrings /etc/apt/preferences.d
 curl -fsSL --retry 3 https://repo.download.nvidia.com/jetson/jetson-ota-public.asc \
@@ -87,6 +91,8 @@ apt-get install -y --no-install-recommends \
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 ldconfig
+
+fi
 
 # Never materialise the ~657 MB DeepStream tarball on Docker's filesystem.
 # Stream directly to extraction and remove demo videos before sealing layer.
@@ -194,6 +200,15 @@ codex --version
 else
   log 'Codex CLI already present.'
 fi
+
+# Keep live scripts in the read-only host bind. Only the executable shim is
+# stored in this container's writable filesystem.
+if [[ ! -x /usr/local/bin/codex-connect ]]; then
+  printf '%s\n' '#!/bin/sh' 'exec /bin/bash /opt/jetson-codex/codex-connect.sh "$@"' \
+    > /usr/local/bin/codex-connect
+  chmod 0755 /usr/local/bin/codex-connect
+fi
+bash /opt/jetson-codex/setup-versions.sh
 
 # Fail provisioning if even basic SDK components are unavailable.
 command -v nvcc
