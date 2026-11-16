@@ -11,10 +11,10 @@ CACHE="$HOME/.cache/jetson-codex/rclone"
 # Only create the mountpoint inside install_mount(), after repair/unmount.
 mkdir -p "$CONFIG_DIR" "$CACHE"
 chmod 700 "$CONFIG_DIR" "$CACHE"
-# Docker runs as root and must stat the user-owned FUSE filesystem. libfuse
-# requires this opt-in before rclone's narrower --allow-root flag can work.
-# This setting permits non-root users to request allow_other/allow_root for
-# their OWN future FUSE mounts; our mount itself stays allow-root only.
+# Docker runs as root and must traverse this user-owned FUSE filesystem.
+# The installed rclone FUSE backend ignores --allow-root, so cloud-mount.sh
+# uses --allow-other plus kernel-enforced restrictive file permissions.
+# libfuse needs this opt-in for unprivileged users to request --allow-other.
 ensure_fuse_root_access() {
   local fuse_conf=/etc/fuse.conf
   if [[ ! -f "$fuse_conf" ]] || ! grep -Eq '^[[:space:]]*user_allow_other([[:space:]]*(#.*)?)?$' "$fuse_conf"; then
