@@ -16,7 +16,7 @@ fi
 FAKE_APT_CACHE = """#!/bin/sh
 case "$2" in
   libnvidia-container1)
-    printf '  Candidate: %s\\n' "\${MOCK_FOURTH_CANDIDATE:-$MOCK_CANDIDATE}" ;;
+    printf '  Candidate: %s\\n' "${MOCK_FOURTH_CANDIDATE:-$MOCK_CANDIDATE}" ;;
   *)
     printf '  Candidate: %s\\n' "$MOCK_CANDIDATE" ;;
 esac
