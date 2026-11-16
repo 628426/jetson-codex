@@ -84,7 +84,7 @@ jobs:
           readme = Path("README.md").read_text()
           assert 'bash ~/jetson-codex/install.sh --uninstall' in readme
           assert 'bash -s -- --uninstall' in readme
-          assert "Remote OneDrive/Google Drive files" in readme
+          assert "Never deletes cloud files." in readme
           assert "bash ./codex-remote.sh auto" in install
           assert install.index("codex login status") < install.index("bash ./codex-remote.sh auto")
           assert "bash ~/jetson-codex/codex-remote.sh pair" in install
