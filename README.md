@@ -112,12 +112,14 @@ file. Compose accepts `JETSON_CODEX_DOCKERFILE` and
 Direct manual build (without installer):
 
 ```bash
-docker build -f Dockerfile.jetpack-7.2.0 -t jetson-codex:jp72-full .
+# For the complete setup, use install.sh (builds base, starts the container,
+# then provisions the full JetPack development SDK in its writable layer).
+bash ./install.sh
 ```
 
-**Note:** This selects the correct *intended* build configuration. The full
-DeepStream/VPI/Codex image has not yet been successfully built and verified on
-this Orin; firmware detection alone cannot guarantee its dependencies work.
+**Note:** The base image contains CUDA/cuDNN and mise only. The full SDK is
+installed **after** container creation. Do not delete/recreate the container
+without accepting loss of its locally installed packages.
 
 ## Codex full trust
 
@@ -174,17 +176,17 @@ as root**. The last check matters: Docker's daemon runs as root, and an
 ordinary user-only FUSE mount can appear healthy to `dex` but fail with
 `mkdir /home/dex/jetson-codex-cloud: file exists` on Docker startup.
 
-The host cloud service uses rclone `--allow-root`, **not**
-`--allow-other`, so only the mounting user and root can access cloud
-content. `configure-storage.sh` idempotently adds `user_allow_other` to
-`/etc/fuse.conf`, as required by libfuse for a non-root user to request
-this access. This changes the host's FUSE permission policy but does not
-expose cloud data to unrelated local users.
+The host cloud service uses `--allow-other --default-permissions` with
+`0700` directory and `0600` file permissions. The rclone FUSE backend in
+this environment ignores `--allow-root`. Root can traverse the mount for
+Docker, while unprivileged host users are restricted by the kernel.
+`configure-storage.sh` enables `user_allow_other` in `/etc/fuse.conf`.
 
 The hardware launcher uses Docker's **explicit `--mount type=bind`** and
 never tries to `mkdir` an existing FUSE mountpoint. Docker Compose uses
-`bind.create_host_path: false`. A failed container creation is cleaned up
-without deleting Docker volumes or images.
+`bind.create_host_path: false`. A failed container creation is **not**
+auto-deleted: inspecting or manually removing a failed instance avoids
+accidentally discarding a populated writable layer.
 
 If any check fails, installation **pauses before building Docker** and asks:
 
@@ -194,7 +196,7 @@ If any check fails, installation **pauses before building Docker** and asks:
 4. Abort without changing the Docker container.
 
 The first rerun after this change may detect that the existing rclone
-mount was started **without** `--allow-root`. Choose **1** to restart it
+mount was started without Docker-readable permissions. Choose **1** to restart it
 with the corrected permissions. Do this after pending cloud uploads
 complete; nothing requires rebuilding the existing CUDA/TensorRT image.
 
@@ -258,16 +260,18 @@ bash ~/jetson-codex/configure-storage.sh --mount
 bash ~/jetson-codex/install.sh
 ```
 
-Normal reruns reuse the existing image and running container when build inputs are unchanged. The installer validates Docker, Codex, full-trust settings, NVIDIA runtime, GitLab/Azure tools and the cloud mount when configured. The full SDK image and FUSE mount are **not yet tested
-on the actual Orin**.
+Normal reruns reuse the minimal CUDA base image and the **same post-provisioned
+container writable layer**, without reinstalling unchanged packages. The
+installer verifies Docker, CUDA, media, Codex, Git CLIs and cloud access.
 
 ## Automatic updates and full-trust verification
 
 The installer now offers **Ubuntu unattended security updates**, using
 `unattended-upgrades`, daily APT timers and weekly APT cache cleaning.
 It invokes `sudo` only for host configuration. The same no-argument installer
-also rebuilds the image when tracked build inputs change. JetPack BSP
-upgrades and untracked upstream tool releases remain manual.
+rebuilds the minimal CUDA base only when its Dockerfile changes; changes
+to `provision-container.sh` are applied within the existing container.
+JetPack BSP upgrades and untracked upstream tool releases remain manual.
 
 The health checker now parses `/root/.codex/config.toml` using Python
 `tomllib` and requires `approval_policy="never"` and
@@ -291,9 +295,10 @@ needed, and runs integrated health checks. It does not create a second
 service account: the invoking user is the inspectable owner of the
 installation. Docker group access is root-equivalent.
 
-The installer fingerprints the selected Dockerfile and its build inputs.
-It rebuilds when they change, using cached layers where possible, and
-reuses an existing image when the build inputs are unchanged.
+The installer separately fingerprints the minimal base Dockerfile and the
+post-start provision script. The CUDA base image is built when needed; the
+running container gets missing SDK packages through `docker exec`. No
+`docker commit`, `docker save` or duplicate full-size exported image.
 
 ## Jetson accelerator passthrough and hardware verification
 
@@ -308,9 +313,9 @@ On every run, `install.sh`:
 
 1. Inventories eligible character devices on the host, without installing
    multimedia/development packages.
-2. Compares those host nodes with **explicit Docker device mappings**, and
-   refreshes the container if a mapping is missing. Named credentials and
-   workspace volumes survive recreation.
+2. Compares host device nodes with **explicit Docker device mappings**.
+   If mappings have changed, it stops safely rather than recreating the
+   container and silently deleting installed packages.
 3. Compares the available host and container device nodes.
 4. Calls the CUDA **driver API** on both host and container and compares the
    discovered GPU counts when the host supports the probe.
@@ -380,11 +385,10 @@ GitHub Enterprise may also require your administrator to enable
 the chosen authentication method. Organisation policies, branch
 protections, token expiration and provider consent still apply.
 
-**Rebuild behaviour:** `install.sh` fingerprints the selected Dockerfile
-and its build scripts. Running the same no-argument command rebuilds when
-those inputs change, but otherwise reuses the image and persisted
-credentials. This is a source-level configuration; it has **not yet passed
-a full ARM64 build or provider OAuth test on dexson**.
+**Update behaviour:** `install.sh` fingerprints the lightweight base
+separately from `provision-container.sh`. It preserves the container's
+writable layer across reruns. This architecture still requires validation
+on the actual ARM64 Jetson.
 
 ## Early Docker disk-space warning
 
@@ -399,51 +403,41 @@ build-headroom allowance** and warns below **48 GiB free**. This is an
 estimate, not a guarantee. The warning doesn't stop Docker or delete
 anything. Actual image size is reported when the container starts.
 
-## Aggressive Docker disk-space management
+## Peak-disk-optimised container design
 
-The installer prioritises **free space for a successful build** over retaining
-build cache for future retries. No large RAM disk is allocated. On the 8 GB
-Orin, the existing swap/zram configuration stays untouched so CUDA compilation
-is not starved of memory.
+Peak disk consumption, not just final image size, is the primary constraint.
 
-**Before a new build:** The installer removes the previous
-`jetson-codex` container and superseded image to reclaim their substantial
-NVMe footprint **before** constructing the replacement. Named authentication
-volumes, cloud storage and host working trees remain intact. Codex is offline
-during the rebuild; if the new build fails, there is no running old container.
-This intentionally prioritises available disk over rollback.
+1. Build a lightweight CUDA/cuDNN base image, without large APT runs.
+2. Start one persistent Docker container with read-only provisioning scripts.
+3. Prune reclaimable BuildKit cache **before** installing the full SDK.
+4. Run `provision-container.sh` through `docker exec` in that live container.
+5. APT downloads and DeepStream archives are deleted/streamed during setup.
+   The installed packages remain in the container's writable overlay layer.
+6. Save a provision fingerprint; unchanged repeat runs skip installation.
 
-It then runs `disk-space.sh pre` to prune **all reclaimable BuildKit
-cache**, including cache from other projects using the selected builder, and
-prunes dangling images. It reports free space on Docker's actual storage
-filesystem. This runs only when the image must be rebuilt.
+**This removes the extra full-image snapshot/export, but the persistent
+container's writable layer is essential state.** `docker rm`,
+`docker compose down`, `docker compose up --force-recreate`, and
+`docker commit` must **not** be used in normal operations.
 
-**During the build:** a background watcher checks free storage every
-20 seconds. Below **12 GiB available**, it immediately prunes unused
-BuildKit records (`inuse=false`) and dangling images. Actively used build
-records are protected by BuildKit. Below **3 GiB** after cleanup, it prints
-a critical warning. It cannot guarantee completion if the actual image
-and active layers exceed available disk capacity.
+A one-time migration from the previous `jp72-full` image requires
+`JETSON_CODEX_MIGRATE=1`; it deliberately deletes the old container's
+writable layer. The installer refuses accidental replacement.
 
-**Inside the image:** APT lists and downloaded `.deb` packages are removed
-within their own build steps. Python pip/pipx, Node/npm and mise download
-caches are cleared in their respective layers. The DeepStream SDK archive
-is streamed straight into `tar` instead of writing an additional
-~657 MB compressed file to Docker scratch space.
+### Cloud read-through mount
 
-**After a successful build and CUDA/DeepStream/TensorRT hardware checks:**
-`disk-space.sh post` fully prunes reclaimable BuildKit cache and dangling
-images, then reports disk usage and the resulting image size.
+The host rclone FUSE mount is exposed **twice** into the same container:
 
-No `docker system prune --volumes`, `docker volume prune`, deletion of
-other containers or recursive removal of the cloud mount occurs. Named auth
-volumes, application data and images still used by containers are preserved.
-No automatic swap resize is attempted: disabling an active swap file would
-not reclaim its allocated disk blocks and can destabilise CUDA builds.
+- `/cloud` is the primary OneDrive project filesystem.
+- `/workspace/projects` remains as a compatibility alias.
 
-**Trade-off:** old BuildKit cache from other projects is discarded; future
-rebuilds may need to redownload packages and recompile. The watcher itself
-does not guarantee disk space if unreclaimable layers are too large.
+Both point to `~/jetson-codex-cloud` on the host. They do **not** duplicate
+remote files. Model downloads using `HF_HOME` and `TORCH_HOME` target
+`/cloud/.cache`. Rclone fetches cloud files on access, using a bounded
+local VFS cache for clean files. Dirty write-back and concurrent downloads
+can still consume additional local disk and are **not** safe to remove before
+uploads finish. Git credentials, `/var/lib/dpkg`, and installed SDK files
+remain on local Docker storage, never on rclone FUSE.
 
 ## One-command install or update
 
@@ -517,9 +511,7 @@ clone and build from the appropriate versioned Dockerfile:
 ```bash
 git clone https://github.com/628426/jetson-codex.git
 cd jetson-codex
-mkdir -p workspace
-docker compose --progress plain build
-docker compose up -d --no-build
+bash ./install.sh
 docker exec -it jetson-codex bash -l
 ```
 
@@ -552,7 +544,7 @@ After a successful build, run these commands **on the Jetson host**:
 
 ```bash
 cd ~/jetson-codex
-docker compose up -d --no-build
+bash ./run-hardware.sh   # start/restart existing, never replace it
 docker ps --filter name=jetson-codex
 docker exec -it jetson-codex bash -l
 ```
@@ -571,13 +563,14 @@ docker exec -it jetson-codex codex       # run Codex directly
 docker logs --tail=100 jetson-codex      # container logs
 docker stop jetson-codex                # stop
 docker start jetson-codex               # start again
-docker compose down                     # remove container, keep named auth volumes
+# DO NOT run docker compose down: post-installed SDK files would be lost
 ```
 
-If you change the Dockerfile, run `docker compose build` and then
-`docker compose up -d --no-build --force-recreate`. `docker compose
-down -v` **deletes authentication volumes**, so don't use `-v` unless
-you deliberately intend to clear saved logins.
+If you change provisioning, rerun `install.sh`; it reconciles packages
+inside the persistent container. Changing the CUDA base Dockerfile requires
+explicit migration (`JETSON_CODEX_MIGRATE=1`) because replacement destroys
+the writable layer. Never use `docker compose down -v`: it also deletes
+authentication volumes.
 
 ### Authenticate Codex with ChatGPT
 
