@@ -59,7 +59,7 @@ apt-cache madison tensorrt-libs | awk '{print $3}' | grep -Fx "$trt_version" >/d
 apt-get install -y --no-install-recommends \
   "tensorrt-libs=$trt_version" "tensorrt=$trt_version" \
   nvidia-tensorrt nvidia-tensorrt-dev libnvvpi4 vpi4-dev
-[[ "$(dpkg-query -W -f='\${Version}' tensorrt-libs)" == "$trt_version" ]] \
+[[ "$(dpkg-query -W -f='${Version}' tensorrt-libs)" == "$trt_version" ]] \
   || fail "Installed TensorRT version does not match JetPack 7.2"
 apt-get clean
 rm -rf /var/lib/apt/lists/*
@@ -82,7 +82,7 @@ ldconfig
 
 # The host driver provides libcuda. Forward-compatibility shims can shadow it.
 for pkg in cuda-compat-13-2 cuda-compat-orin-13-2; do
-  if dpkg-query -W -f='\${Status}' "$pkg" 2>/dev/null | grep -Fxq 'install ok installed'; then
+  if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -Fxq 'install ok installed'; then
     apt-get purge -y "$pkg"
   fi
 done
