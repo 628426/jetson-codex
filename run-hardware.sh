@@ -72,6 +72,8 @@ args+=("$image" bash /opt/jetson-codex/container-keepalive.sh)
 # automatically: the installer must not guess what needs preserving.
 docker "${args[@]}" || {
   echo "Container startup failed. Inspect docker ps -a; no cleanup was attempted." >&2
+  echo "If the error mentions nvidia-cdi-hook/cudacompat/cuda-elf-header.go, NVIDIA fixed the Orin CUDA compatibility parser in Container Toolkit 1.19.1." >&2
+  echo "Check installed host package versions: dpkg-query -W nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1" >&2
   exit 1
 }
 if [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env" ]]; then

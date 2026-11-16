@@ -349,6 +349,55 @@ post-start provision script. The CUDA base image is built when needed; the
 running container gets missing SDK packages through `docker exec`. No
 `docker commit`, `docker save` or duplicate full-size exported image.
 
+## Orin CUDA CDI hook crash on JetPack 7.2 (R39.2)
+
+If Docker fails at `createContainer hook #2` with
+`nvidia-cdi-hook/cudacompat/cuda-elf-header.go:100` or
+`slice bounds out of range [:73] with capacity 71`, the failure occurs
+**on the host**, before a container can run. It is an NVIDIA Container
+Toolkit bug: the CUDA compatibility ELF header on Orin triggered this panic.
+NVIDIA fixed it in **Container Toolkit 1.19.1**. This is not a rclone,
+GPU device-mapping or container APT problem.
+
+The previous full image also **purged `cuda-compat-13-2` and
+`cuda-compat-orin-13-2` before startup**. The minimal image initially
+omitted that safeguard. It now performs only this conditional removal in
+its Dockerfile, prior to OCI startup; all heavyweight package installation
+still occurs after the persistent container starts.
+
+The installer checks the host's four Nvidia toolkit packages on every run:
+`nvidia-container-toolkit`, `nvidia-container-toolkit-base`,
+`libnvidia-container-tools` and `libnvidia-container1`. If all are
+1.19.1 or newer, it makes **no changes**. If any are older/missing, it
+refreshes the configured APT repositories, verifies that all four have
+the same fixed candidate version, simulates the transaction, refuses
+package removals, then installs exactly those four packages. It does **not**
+upgrade JetPack, drivers, CUDA or unrelated host software.
+
+Inspect the installed package versions without changing anything:
+
+```bash
+dpkg-query -W nvidia-container-toolkit nvidia-container-toolkit-base \
+  libnvidia-container-tools libnvidia-container1
+```
+
+To retry after a corrected host-toolkit installation:
+
+```bash
+bash ~/jetson-codex/install.sh
+```
+
+An OCI startup failure may have left a `Created` container. On an
+**unchanged** base, the launcher retries starting that same container. When
+the base Dockerfile changes, the installer automatically removes an owned
+container **only if** Docker confirms its state is `created` and PID 1 has
+never started. Anything that might contain post-installed SDK changes
+requires explicit migration (`JETSON_CODEX_MIGRATE=1`). If the configured APT repositories lack a consistent fixed
+toolkit, the installer stops instead of introducing a driver mismatch.
+
+Sources: [NVIDIA 1.19.1 release notes](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/1.19.1/release-notes.html)
+and [Jetson R39.2 reproduction](https://forums.developer.nvidia.com/t/cuda-13-2-1-runtime-image-cant-run-on-r39-2-sample-rootfs-for-orin-nano/372683).
+
 ## Jetson accelerator passthrough and hardware verification
 
 The single installer now inventories **both the Jetson host and the running

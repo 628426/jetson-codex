@@ -2,7 +2,8 @@
 # Minimal persistent JetPack 7.2 / L4T R39.2 container foundation.
 # Bring this container up FIRST. The full SDK is installed later into its
 # own writable layer by provision-container.sh via docker exec.
-# No Dockerfile APT, SDK unpacking, docker commit, or duplicate image export.
+# Only a conditional cuda-compat package purge occurs here before startup.
+# No SDK unpacking, language APT installs, docker commit or image export.
 ARG CUDA_IMAGE=nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04
 FROM ghcr.io/jdx/mise:2026.10.4 AS mise-binary
 FROM ${CUDA_IMAGE}
@@ -23,6 +24,19 @@ ENV LD_LIBRARY_PATH="/opt/nvidia/deepstream/deepstream-9.1/lib:/usr/local/cuda/l
 # dpkg and durable credentials on local Docker storage instead.
 ENV HF_HOME=/cloud/.cache/huggingface \
     TORCH_HOME=/cloud/.cache/torch
+# The CUDA devel base may contain cuda-compat ELF shims. On Jetson R39.2,
+# the NVIDIA CDI hook can read their Orin note during OCI creation and panic.
+# The previous full image purged these shims BEFORE first container startup.
+# Keep this tiny, conditional purge in the minimal base; install the full
+# CUDA/TensorRT/DeepStream SDK only AFTER the container is started.
+RUN for pkg in cuda-compat-13-2 cuda-compat-orin-13-2; do \
+      if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -Fxq 'install ok installed'; then \
+        apt-get purge -y --no-install-recommends "$pkg"; \
+      fi; \
+    done \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+
 COPY --from=mise-binary /usr/local/bin/mise /usr/local/bin/mise
 ARG JETSON_CODEX_BUILD_HASH=untracked
 LABEL org.jetson-codex.build-hash="${JETSON_CODEX_BUILD_HASH}"
