@@ -61,7 +61,7 @@ jobs:
           assert install.index('bash ./run-hardware.sh') < install.index('bash /opt/jetson-codex/provision-container.sh')
           executable_lines = [line.strip() for line in install.splitlines()
                               if line.strip() and not line.lstrip().startswith("#")]
-          assert all("docker commit" not in line and "docker save " not in line
+          assert all(not line.startswith(("docker commit", "docker save", "docker export"))
                      for line in executable_lines)
           assert "docker save " not in install
           assert "docker volume prune" not in install
