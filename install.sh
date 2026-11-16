@@ -37,7 +37,21 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 
-(( $# == 0 )) || fail "No parameters supported. Run install.sh without arguments."
+# Only one installer option: --uninstall. Handle it before JetPack,
+# Docker, network and cloud health checks, including on incomplete installs.
+if [[ "$#" -eq 1 && "$1" == "--uninstall" ]]; then
+  [[ "$EUID" -ne 0 ]] || fail "Run uninstall as the installing user, not root."
+  if [[ -f "$REPO_DIR/uninstall.sh" ]]; then
+    bash "$REPO_DIR/uninstall.sh"
+  else
+    # A checkout may be absent or partially installed; the verified main
+    # helper can still remove project-specific Docker/systemd resources.
+    curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/uninstall.sh |
+      bash || fail "Cannot run uninstall helper."
+  fi
+  exit 0
+fi
+(( $# == 0 )) || fail "Usage: install.sh [--uninstall]"
 [[ $EUID -ne 0 ]] || fail "Run as your normal account, not sudo."
 [[ "$(uname -s)" == "Linux" ]] || fail "Linux is required."
 [[ -f /etc/os-release ]] || fail "Cannot identify host OS."
