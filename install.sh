@@ -241,8 +241,10 @@ if [[ -f "$STORAGE_ENV" ]]; then
     fail "Cloud storage is unavailable. Repair it via the interactive menu; Docker build NOT started."
 fi
 # The one-command installer updates changed build inputs automatically.
+# Heavy APT/SDK installation is one BuildKit RUN, with no post-up docker commit
+# or Docker save archive. Helper-only changes reuse the expensive layer.
 # Do not rebuild for README-only changes, or on healthy no-op reruns.
-BUILD_INPUTS=("$DOCKERFILE" "setup-versions.sh" "verify.sh" "entrypoint.sh" "configure-full-trust.py" "codex-connect.sh" "hardware-check.sh" "tensorrt-smoke.cpp")
+BUILD_INPUTS=("$DOCKERFILE" "provision-image.sh" "setup-versions.sh" "verify.sh" "entrypoint.sh" "configure-full-trust.py" "codex-connect.sh" "hardware-check.sh" "tensorrt-smoke.cpp")
 for input in "${BUILD_INPUTS[@]}"; do
   [[ -f "$input" ]] || fail "Missing Docker build dependency: $input"
 done
@@ -276,7 +278,7 @@ if (( BUILD )); then
   say "Reclaiming unused Docker storage before starting this build."
   bash ./disk-space.sh pre || say "WARNING: Pre-build Docker cleanup could not complete."
   check_docker_free_space
-  say "Building ARM64 CUDA/TensorRT/DeepStream + Codex with live disk monitoring."
+  say "Building single-layer NVIDIA SDK + developer image with live free-space monitoring."
   bash ./disk-space.sh monitor "$BASHPID" &
   DISK_MONITOR_PID=$!
   if ! docker compose --progress plain build; then
