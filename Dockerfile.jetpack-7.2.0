@@ -2,7 +2,8 @@
 # Minimal persistent JetPack 7.2 / L4T R39.2 container foundation.
 # Bring this container up FIRST. The full SDK is installed later into its
 # own writable layer by provision-container.sh via docker exec.
-# No Dockerfile APT, SDK unpacking, docker commit, or duplicate image export.
+# Only a conditional cuda-compat package purge occurs here before startup.
+# No SDK unpacking, language APT installs, docker commit or image export.
 ARG CUDA_IMAGE=nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04
 FROM ghcr.io/jdx/mise:2026.10.4 AS mise-binary
 FROM ${CUDA_IMAGE}
