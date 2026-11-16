@@ -1,7 +1,7 @@
 services:
   jetson-codex:
     container_name: jetson-codex
-    image: ${JETSON_CODEX_IMAGE:-jetson-codex:jp72-full}
+    image: ${JETSON_CODEX_IMAGE:-jetson-codex:jp72-base}
     build:
       context: .
       dockerfile: ${JETSON_CODEX_DOCKERFILE:-Dockerfile.jetpack-7.2.0}
@@ -11,6 +11,8 @@ services:
     platform: linux/arm64
     runtime: nvidia
     restart: unless-stopped
+    # Persistent writable layer contains post-up APT/SDK packages.
+    # WARNING: compose down/recreate destroys that layer. Use install.sh instead.
     # Keep the container alive; enter on demand using docker exec.
     command: ["sleep", "infinity"]
     # Host networking retained for local development tools and camera services.
@@ -25,6 +27,11 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: all
       GIT_CONFIG_GLOBAL: /root/.config/git/config
     volumes:
+      # The repository is a read-only control plane for post-up provisioning.
+      - type: bind
+        source: .
+        target: /opt/jetson-codex
+        read_only: true
       - ./workspace:/workspace
       # Do not let Docker mkdir the source of a real FUSE filesystem.
       - type: bind
