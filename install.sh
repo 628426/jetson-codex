@@ -48,7 +48,7 @@ l4t="$(sed -nE 's/^# R([0-9]+) \(release\), REVISION: ([0-9]+\.[0-9]+).*/\1.\2/p
 case "$l4t" in
   39.2.0)
     DOCKERFILE="Dockerfile.jetpack-7.2.0"
-    IMAGE="jetson-codex:jp72-full"
+    IMAGE="jetson-codex:jp72-base"
     ;;
   *) fail "Unsupported L4T $l4t. No Dockerfile selected; refusing to guess compatibility." ;;
 esac
@@ -240,63 +240,76 @@ if [[ -f "$STORAGE_ENV" ]]; then
   bash ./storage-health.sh ||
     fail "Cloud storage is unavailable. Repair it via the interactive menu; Docker build NOT started."
 fi
-# The one-command installer updates changed build inputs automatically.
-# Heavy APT/SDK installation is one BuildKit RUN, with no post-up docker commit
-# or Docker save archive. Helper-only changes reuse the expensive layer.
-# Do not rebuild for README-only changes, or on healthy no-op reruns.
-BUILD_INPUTS=("$DOCKERFILE" "provision-image.sh" "setup-versions.sh" "verify.sh" "entrypoint.sh" "configure-full-trust.py" "codex-connect.sh" "hardware-check.sh" "tensorrt-smoke.cpp")
-for input in "${BUILD_INPUTS[@]}"; do
-  [[ -f "$input" ]] || fail "Missing Docker build dependency: $input"
-done
-export JETSON_CODEX_BUILD_HASH="$(sha256sum "${BUILD_INPUTS[@]}" | sha256sum | awk '{print $1}')"
-if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  BUILD=1
-else
-  installed_hash="$(docker image inspect --format '{{index .Config.Labels "org.jetson-codex.build-hash"}}' "$IMAGE" 2>/dev/null || true)"
-  if [[ "$installed_hash" != "$JETSON_CODEX_BUILD_HASH" ]]; then
-    say "Docker build inputs changed; rebuilding with cached layers where possible."
-    BUILD=1
+# Peak-space architecture:
+# 1. Build the minimal CUDA foundation (never the full SDK).
+# 2. Start ONE persistent container, then reclaim BuildKit cache.
+# 3. APT/DeepStream/Codex install into that container's writable layer.
+# 4. NEVER docker commit/export or silently replace a provisioned container.
+# Keep independent hashes: helper/provision changes must not rebuild CUDA base.
+[[ -f "$DOCKERFILE" ]] || fail "Selected base Dockerfile missing."
+[[ -f provision-container.sh ]] || fail "Post-up provisioning script missing."
+export JETSON_CODEX_BUILD_HASH="$(sha256sum "$DOCKERFILE" | awk '{print $1}')"
+PROVISION_HASH="$(sha256sum provision-container.sh | awk '{print $1}')"
+PROVISIONED=0
+# A one-time legacy migration deletes the previous full-image container's
+# writable layer. This is NEVER automatic even if all named volumes are safe.
+if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+  current_image="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")"
+  if [[ "$current_image" != "$IMAGE" ]]; then
+    if [[ "$current_image" == jetson-codex:jp72-full && "${JETSON_CODEX_MIGRATE:-0}" == 1 ]]; then
+      say "Explicit migration requested: replacing legacy full-image container."
+      say "WARNING: unmounted data in its writable layer will be lost; named auth volumes and host mounts survive."
+      docker rm -f "$CONTAINER" >/dev/null || fail "Cannot remove legacy container."
+      docker image rm jetson-codex:jp72-full >/dev/null || say "Legacy image still referenced; leaving it alone."
+    else
+      fail "Existing $CONTAINER uses $current_image. To migrate from the legacy full image explicitly run JETSON_CODEX_MIGRATE=1 (this discards unmounted container changes). No data changed."
+    fi
   fi
 fi
+
+if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  installed_hash="$(docker image inspect --format '{{index .Config.Labels "org.jetson-codex.build-hash"}}' "$IMAGE" 2>/dev/null || true)"
+  if [[ "$installed_hash" != "$JETSON_CODEX_BUILD_HASH" ]]; then
+    if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+      if [[ "${JETSON_CODEX_MIGRATE:-0}" != 1 ]]; then
+        fail "Base image changed, but the existing container holds post-installed packages. Refusing to recreate it. Explicit JETSON_CODEX_MIGRATE=1 required."
+      fi
+      say "Explicit base replacement requested. Discarding container writable layer; named volumes survive."
+      docker rm -f "$CONTAINER" >/dev/null || fail "Cannot remove old base container."
+    fi
+    docker image rm "$IMAGE" >/dev/null || fail "Cannot replace incompatible base image."
+    BUILD=1
+  else
+    say "Minimal CUDA base image is current; skipping Docker build."
+  fi
+else
+  BUILD=1
+fi
+
 if (( BUILD )); then
-  # Free the old, very large Jetson Codex image BEFORE building its replacement.
-  # We deliberately trade rollback/uptime for NVMe headroom. Docker named auth
-  # volumes, bind-mounted Git projects and cloud data are NOT deleted.
-  if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
-    old_container_image="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")"
-    [[ "$old_container_image" == "$IMAGE" ]] ||
-      fail "Container $CONTAINER belongs to $old_container_image, not $IMAGE; refusing to delete an unrelated container."
-    say "Stopping/removing old $CONTAINER container BEFORE build to free disk; all auth volumes retained."
-    docker rm -f "$CONTAINER" >/dev/null ||
-      fail "Unable to remove old $CONTAINER container safely."
-  fi
-  if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    say "Removing obsolete $IMAGE image before rebuilding to release its layers."
-    docker image rm "$IMAGE" ||
-      say "WARNING: Old image is still referenced by another container/tag and cannot be freed."
-  fi
-  say "Reclaiming unused Docker storage before starting this build."
-  bash ./disk-space.sh pre || say "WARNING: Pre-build Docker cleanup could not complete."
-  check_docker_free_space
-  say "Building single-layer NVIDIA SDK + developer image with live free-space monitoring."
+  say "Building minimal CUDA base (no APT or SDK provisioning in Dockerfile)."
+  bash ./disk-space.sh pre || say "WARNING: Pre-base cache cleanup failed."
   bash ./disk-space.sh monitor "$BASHPID" &
   DISK_MONITOR_PID=$!
   if ! docker compose --progress plain build; then
     stop_disk_monitor
-    fail "Docker build failed. Check the output above; existing containers and volumes were not deleted."
+    fail "Minimal CUDA base build failed. No container was automatically removed."
   fi
   stop_disk_monitor
-else
-  docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "--no-build requested, but $IMAGE is missing."
-  say "Reusing existing image: $IMAGE"
+fi
+docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "CUDA base image unavailable."
+# Critical for peak space: dispose of reclaimable build cache BEFORE starting
+# the large post-up APT process, not after it has accumulated its downloads.
+if (( BUILD )) || ! docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+  say "Freeing BuildKit cache before post-start APT provisioning."
+  bash ./disk-space.sh post || say "WARNING: BuildKit cache cleanup failed."
 fi
 
-# Cloud health can change during a long NVIDIA build. Verify it again
-# before recreating the running container and binding the FUSE directory.
+# Cloud access can change while pulling the minimal base. Recheck the live
+# FUSE mount before Docker startup, but don't mutate credentials.
 if [[ -f "$STORAGE_ENV" ]]; then
-  say "Rechecking cloud storage after build, before container startup."
-  bash ./storage-health.sh ||
-    fail "Cloud storage failed after build. Docker container was not replaced."
+  say "Rechecking cloud storage before starting the persistent container."
+  bash ./storage-health.sh || fail "Cloud unavailable; container left untouched."
 fi
 
 # The existing container may predate support for the NVDEC/VIC/NVJPG
@@ -378,44 +391,42 @@ hardware_health() {
 
   # Building a TensorRT engine can take time on the 7W Orin. Run on each
   # newly built image; on unchanged reruns, retain the fast SDK checks.
-  if (( BUILD )); then
+  if (( PROVISIONED )); then
     say "Building a small TensorRT 10 engine and executing GPU inference."
     docker exec "$CONTAINER" bash /opt/jetson-codex/hardware-check.sh --tensorrt \
       || fail "TensorRT GPU inference failed: compiler, TensorRT SDK or CUDA runtime is not usable."
   fi
 }
 
+# Never recycle the post-provisioned upperdir to refresh hardware devices.
+# Device mappings are fixed at creation; fail safely if a new device appears.
 if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
-  current_image="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")"
-  [[ "$current_image" == "$IMAGE" ]] || fail "A container named '$CONTAINER' already exists using '$current_image'. Not replacing an unrelated container."
-  if [[ "$MODE" == "hardware" ]]; then
-    if (( BUILD )) || ! docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER" || ! docker exec "$CONTAINER" test -d /workspace/projects || ! explicit_devices_current; then
-      say "Refreshing hardware container (persistent volumes retained)."
-      docker rm -f "$CONTAINER" >/dev/null
-    else
-      say "Container already running; leaving it untouched."
-    fi
-  else
-    compose_service="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "$CONTAINER" 2>/dev/null || true)"
-    if [[ "$compose_service" != "jetson-codex" ]]; then
-      say "Replacing hardware-run container with Compose-managed GPU-only container (volumes retained)."
-      docker rm -f "$CONTAINER" >/dev/null
-    fi
+  if ! explicit_devices_current; then
+    fail "Host character devices changed since container creation. Refusing to recreate and lose installed SDK; arrange an explicit migration."
   fi
 fi
+say "Ensuring persistent hardware container is running without replacing it."
+bash ./run-hardware.sh || fail "Could not start/reuse the persistent container."
+docker ps --filter "name=^/$CONTAINER$" --format '{{.Names}}' | grep -Fxq "$CONTAINER" \
+  || fail "$CONTAINER is not running; inspect docker logs."
 
-if [[ "$MODE" == "hardware" ]]; then
-  if ! docker container inspect "$CONTAINER" >/dev/null 2>&1; then
-    say "Starting GPU + detected hardware devices via run-hardware.sh"
-    bash ./run-hardware.sh
-  fi
+# Install the heavy SDK only AFTER the container is running.
+# The per-container marker and command probes make normal reruns a no-op.
+current_hash="$(docker exec "$CONTAINER" cat /var/lib/jetson-codex/provision.sha256 2>/dev/null || true)"
+if [[ "$current_hash" == "$PROVISION_HASH" ]] \
+  && docker exec "$CONTAINER" test -x /opt/nvidia/deepstream/deepstream-9.1/bin/deepstream-app \
+  && docker exec "$CONTAINER" bash -c 'command -v codex && command -v gh && command -v glab && command -v az' >/dev/null 2>&1; then
+  say "Post-up SDK provision marker and tools match; skipping APT/DeepStream installation."
 else
-  say "Starting GPU-only Compose service"
-  docker compose up -d --no-build
-fi
-
-if ! docker ps --filter "name=^/$CONTAINER$" --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
-  fail "$CONTAINER is not running; inspect 'docker logs $CONTAINER'."
+  PROVISIONED=1
+  say "Running one-off post-up APT/SDK provision inside existing container upperdir."
+  say "No docker commit/export and no duplicate full image will be created."
+  docker exec -e "JETSON_CODEX_PROVISION_HASH=$PROVISION_HASH" "$CONTAINER" \
+    bash /opt/jetson-codex/provision-container.sh \
+    || fail "Post-up provision failed. Existing container retained, including partial APT state. Rerun to resume."
+  [[ "$(docker exec "$CONTAINER" cat /var/lib/jetson-codex/provision.sha256 2>/dev/null || true)" == "$PROVISION_HASH" ]] \
+    || fail "Post-up provision marker mismatch."
+  say "Post-up provisioning complete. Container writable layer retained."
 fi
 
 # Verify NVIDIA devices and execute a real NVDEC decode on every rerun.
@@ -424,13 +435,13 @@ hardware_health
 # Reclaim all eligible cache as soon as hardware acceptance completes.
 # A failed install also receives EXIT-trap scratch cleanup, and the monitor
 # prunes during the build if Docker storage drops below its free-space target.
-if (( BUILD )); then
-  bash ./disk-space.sh post || say "WARNING: Post-build Docker cleanup failed."
+if (( PROVISIONED )); then
+  say "Post-up image provision complete. No image export or commit performed."
 fi
 
 image_bytes="$(docker image inspect --format '{{.Size}}' "$IMAGE" 2>/dev/null || true)"
 if [[ "$image_bytes" =~ ^[0-9]+$ ]]; then
-  say "Built image (uncompressed filesystem layers): $(awk -v n="$image_bytes" 'BEGIN { printf "%.2f GiB", n/1073741824 }')"
+  say "Minimal base image (uncompressed filesystem layers): $(awk -v n="$image_bytes" 'BEGIN { printf "%.2f GiB", n/1073741824 }')"
 fi
 
 # User-requested full trust: Codex may execute commands without approval prompts.
@@ -504,7 +515,9 @@ fi
 
 cat <<'DONE'
 
-[jetson-codex] Persistent container is running.
+[jetson-codex] Persistent, post-provisioned container is running.
+Do not run docker rm or docker compose down: those remove installed SDK files
+stored in its writable layer. docker stop/start preserves the installation.
 
 Enter it:
   docker exec -it jetson-codex bash -l
@@ -524,7 +537,8 @@ Run Codex:
 Link or inspect Git providers any time:
   docker exec -it jetson-codex codex-connect
 
-Saved credentials and full-trust settings survive container recreation and image rebuilds.
+Saved credentials persist in named volumes. Installed SDK tools are in the
+container writable layer and DO NOT survive container deletion/recreation.
 WARNING: Codex can execute commands without approval. This container uses host
 networking and has access to mapped hardware and your mounted workspace.
 DONE
