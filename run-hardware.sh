@@ -65,7 +65,9 @@ echo "[jetson-codex] Mapping ${#hardware_nodes[@]} available host character devi
 if [[ -S /tmp/argus_socket ]]; then
   args+=(--mount "type=bind,source=/tmp/argus_socket,target=/tmp/argus_socket")
 fi
-args+=("$image" sleep infinity)
+# Host-mounted keepalive restores the managed Codex remote daemon on boot
+# without deleting the persistent container or modifying the CUDA base image.
+args+=("$image" bash /opt/jetson-codex/container-keepalive.sh)
 # docker run may leave a Failed/Created container. Refuse to remove it
 # automatically: the installer must not guess what needs preserving.
 docker "${args[@]}" || {
