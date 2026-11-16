@@ -359,6 +359,12 @@ Toolkit bug: the CUDA compatibility ELF header on Orin triggered this panic.
 NVIDIA fixed it in **Container Toolkit 1.19.1**. This is not a rclone,
 GPU device-mapping or container APT problem.
 
+The previous full image also **purged `cuda-compat-13-2` and
+`cuda-compat-orin-13-2` before startup**. The minimal image initially
+omitted that safeguard. It now performs only this conditional removal in
+its Dockerfile, prior to OCI startup; all heavyweight package installation
+still occurs after the persistent container starts.
+
 The installer checks the host's four Nvidia toolkit packages on every run:
 `nvidia-container-toolkit`, `nvidia-container-toolkit-base`,
 `libnvidia-container-tools` and `libnvidia-container1`. If all are
@@ -381,10 +387,12 @@ To retry after a corrected host-toolkit installation:
 bash ~/jetson-codex/install.sh
 ```
 
-An OCI startup failure may have left a `Created` container. The launcher
-will **restart that same container**, retaining any writable-layer state;
-it will not remove it or rebuild the base simply to retry NVIDIA runtime
-injection. If the configured APT repositories lack a consistent fixed
+An OCI startup failure may have left a `Created` container. On an
+**unchanged** base, the launcher retries starting that same container. When
+the base Dockerfile changes, the installer automatically removes an owned
+container **only if** Docker confirms its state is `created` and PID 1 has
+never started. Anything that might contain post-installed SDK changes
+requires explicit migration (`JETSON_CODEX_MIGRATE=1`). If the configured APT repositories lack a consistent fixed
 toolkit, the installer stops instead of introducing a driver mismatch.
 
 Sources: [NVIDIA 1.19.1 release notes](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/1.19.1/release-notes.html)
