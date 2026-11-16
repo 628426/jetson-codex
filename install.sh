@@ -168,6 +168,13 @@ if (( NEED_NVIDIA_RUNTIME )); then
   sudo systemctl restart docker
   docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"' || fail "NVIDIA runtime still missing."
 fi
+# R39.2's pre-1.19.1 CUDA CDI hook can crash on Orin's ELF compatibility
+# note before PID 1 starts. Fix host toolkit once, using only existing NVIDIA
+# APT sources, without altering JetPack drivers or the container image.
+# A healthy toolkit is a no-op here, not an unconditional APT operation.
+say "Verifying host NVIDIA CDI runtime can parse the Orin CUDA compat header."
+bash ./check-nvidia-toolkit.sh ||
+  fail "Host NVIDIA Container Toolkit needs repair before Docker can start. No container or cloud data deleted."
 # Check each independent security-update prerequisite before changing it.
 if dpkg-query -W -f='\x24{Status}' unattended-upgrades 2>/dev/null | grep -Fxq 'install ok installed'; then
   say "Ubuntu unattended-upgrades package already installed."
