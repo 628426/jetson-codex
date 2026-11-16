@@ -19,119 +19,93 @@ jobs:
         run: python3 -m py_compile configure-full-trust.py
       - name: Validate Docker Compose configuration
         run: docker compose config --quiet
-      - name: Enforce lean NVIDIA and Codex toolchain policy
+      - name: Validate low-peak persistent-container architecture
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          banned_markers = (
-              "rustup", "swiftly", "phpenv", "composer",
-              "golangci-lint", "gradle@", "maven@",
-              "mise install \"ruby@", "mise install \"java@",
-              "mise install \"go@", "mise install \"bun@",
-              "mise install \"erlang@", "mise install \"elixir@",
-              "bazelisk-linux", "pipx install poetry",
-              "black mypy", "yarn@",
-          )
-          for file in ("Dockerfile", "Dockerfile.jetpack-7.2.0"):
-              src = Path(file).read_text()
-              commands = "\n".join(line for line in src.splitlines()
-                                   if not line.lstrip().startswith("#"))
-              assert src.count("ARG NODE_VERSION=") == 1, file
-              assert 'mise install "node@${NODE_VERSION}"' in src, file
-              assert 'mise install "glab@${GLAB_VERSION}"' in src, file
-              assert "pipx install uv" in src and "pipx install ruff" in src
-              assert "python3 -c 'import sys; assert sys.version_info[:2] == (3,12)" in src
-              assert "nvvpi" in src and "libgstreamer1.0-dev" in src
-              for term in banned_markers:
-                  assert term not in commands.lower(), (file, term)
-              for name in ("PYTHON_VERSION", "JAVA_VERSION", "RUST_VERSION",
-                           "GO_VERSION", "RUBY_VERSION", "PHP_VERSION",
-                           "SWIFT_VERSION", "ERLANG_VERSION", "ELIXIR_VERSION",
-                           "BUN_VERSION", "INSTALL_PHP", "INSTALL_SWIFT"):
-                  assert f"ARG {name}=" not in src, (file, name)
-          compose = Path("compose.yaml").read_text()
-          assert "INSTALL_PHP" not in compose
-          assert "INSTALL_SWIFT" not in compose
-          verify = Path("verify.sh").read_text()
-          for old in ("'Rust'", "'Ruby'", "'Java'", "'Swift'",
-                      "'PHP'", "'Erlang'", "'Elixir'", "'Go'"):
-              assert old not in verify, old
+          import re
+
+          image = Path("Dockerfile.jetpack-7.2.0").read_text()
+          assert image == Path("Dockerfile").read_text()
+          assert "nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04" in image
+          assert "RUN apt-get" not in image
+          assert "RUN --mount" not in image
+          assert "COPY --from=mise-binary" in image
+          assert "ENV HF_HOME=/cloud/.cache/huggingface" in image
+          assert "ENV NVIDIA_VISIBLE_DEVICES=all" in image
+
+          provision = Path("provision-container.sh").read_text()
+          assert "DeepStream 9.1" in provision
+          assert "10.16.2.10-1+cuda13.2" in provision
+          assert "libnvvpi4 vpi4-dev" in provision
+          assert "pipx install uv" in provision
+          assert "pipx install ruff" in provision
+          assert "glab@1.128.0" in provision
+          assert "node@26.11.0" in provision
+          assert "curl -fLSs" in provision and "tar -xjf - -C /" in provision
+          assert "codex-aarch64-unknown-linux-musl" in provision
+          assert "apt-get clean" in provision
+          assert "provision.sha256" in provision
+          assert 'bash /opt/jetson-codex/setup-versions.sh' in provision
+          assert "/usr/local/bin/codex-connect" in provision
+          for term in ("rustup", "swiftly", "phpenv", "composer", "tritonserver"):
+              assert term not in provision.lower()
+
           install = Path("install.sh").read_text()
-          assert 'Installer paused before Docker build.' in install
-          assert 'Cloud setup failed or was interrupted. Docker build NOT started.' in install
-          assert install.index('Installer paused before Docker build.') < install.index("BUILD_INPUTS=")
-          # NVIDIA runtime and full DeepStream experimentation must remain
-          # accessible despite the general-language slimming effort.
+          assert "Installer paused before Docker build." in install
+          assert "Cloud setup failed or was interrupted. Docker build NOT started." in install
+          assert install.index("bash ./storage-health.sh") < install.index("BUILD_INPUTS=") if "BUILD_INPUTS=" in install else True
+          assert "provision-container.sh" in install
+          assert "JETSON_CODEX_MIGRATE" in install
+          assert "docker compose --progress plain build" in install
+          assert install.index('bash ./run-hardware.sh') < install.index('bash /opt/jetson-codex/provision-container.sh')
+          executable_lines = [line.strip() for line in install.splitlines()
+                              if line.strip() and not line.lstrip().startswith("#")]
+          assert all(not line.startswith(("docker commit", "docker save", "docker export"))
+                     for line in executable_lines)
+          assert "docker save " not in install
+          assert "docker volume prune" not in install
+          assert "bash ./disk-space.sh post" in install
+          assert "PROVISION_HASH" in install
+
+          launch = Path("run-hardware.sh").read_text()
+          assert 'target=/cloud,bind-propagation=rslave' in launch
+          assert 'target=/workspace/projects,bind-propagation=rslave' in launch
+          assert "manual migration required" in launch
+          assert 'docker rm -f "$container"' not in launch
+          assert "docker start" in launch
+          assert 'target=/opt/jetson-codex,readonly' in launch
+          compose = Path("compose.yaml").read_text()
+          assert "target: /cloud" in compose and "target: /workspace/projects" in compose
+          assert "create_host_path: false" in compose
+          assert "read_only: true" in compose
+
+          hardware = Path("hardware-check.sh").read_text()
+          assert "--deepstream" in hardware and "--tensorrt" in hardware
+          assert "nvvideoconvert" in hardware and "nvtracker" in hardware
           assert Path("tensorrt-smoke.cpp").exists()
-          cpp = Path("tensorrt-smoke.cpp").read_text()
-          assert "buildSerializedNetwork" in cpp and "enqueueV3" in cpp
-          hw = Path("hardware-check.sh").read_text()
-          assert "--deepstream" in hw and "--tensorrt" in hw
-          assert "nvvideoconvert" in hw and "nvtracker" in hw
-          for file in ("Dockerfile", "Dockerfile.jetpack-7.2.0"):
-              src = Path(file).read_text()
-              assert "9.1-triton-multiarch" not in src, file
-              assert "nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04" in src, file
-              assert "nvidia-tensorrt-dev libnvvpi4 vpi4-dev" in src, file
-              # The generic CUDA repository now offers TensorRT 11.x; JetPack
-              # 7.2's NVIDIA metapackages require exactly 10.16.2.10 + CUDA 13.2.
-              assert "ARG TENSORRT_VERSION=10.16.2.10-1+cuda13.2" in src, file
-              assert "'Pin: version 10.16.2.10-1+cuda13.2'" in src, file
-              assert "'Pin-Priority: 1001'" in src, file
-              assert '"tensorrt-libs=${TENSORRT_VERSION}"' in src, file
-              assert '"tensorrt=${TENSORRT_VERSION}"' in src, file
-              assert "apt-cache policy tensorrt-libs tensorrt" in src, file
-              assert "dpkg-query -W -f='${Version}' tensorrt-libs" in src, file
-              assert "deepstream_sdk_v${DEEPSTREAM_VERSION}_jetson.tbz2" in src, file
-              assert "tensorrt-smoke.cpp /opt/jetson-codex/" in src, file
-          assert '"tensorrt-smoke.cpp"' in install
-          assert '--deepstream' in install and '--tensorrt' in install
+          assert "enqueueV3" in Path("tensorrt-smoke.cpp").read_text()
           assert "TensorRT GPU inference" in Path("verify.sh").read_text()
+
           storage = Path("storage-health.sh").read_text()
           assert "storage_healthy()" in storage
           assert "reconnect_oauth()" in storage
           assert "reconfigure_storage()" in storage
-          assert "mountpoint -q" in storage and 'rclone lsf' in storage
-          assert 'bash ./storage-health.sh' in install
-          assert install.index('bash ./storage-health.sh') < install.index('BUILD_INPUTS=')
-          assert 'rclone config reconnect' in Path("configure-storage.sh").read_text()
-          assert "@{" not in Path("configure-storage.sh").read_text()
+          assert "mountpoint -q" in storage and "rclone lsf" in storage
           cloud_mount = Path("cloud-mount.sh").read_text()
-          assert "--allow-root" in cloud_mount
-          assert "user_allow_other" in Path("configure-storage.sh").read_text()
+          assert "  --allow-other" in cloud_mount
+          assert "  --default-permissions" in cloud_mount
           assert "sudo timeout 15 ls -A" in storage
-          launch = Path("run-hardware.sh").read_text()
-          assert 'type=bind,source=$cloud_mount,target=/workspace/projects,bind-propagation=rslave' in launch
-          assert 'mkdir -p workspace workspace/source "$HOME/jetson-codex-cloud"' not in launch
-          assert 'docker rm -f jetson-codex' in launch
-          assert "Docker cannot list /workspace/projects" in launch
-          compose = Path("compose.yaml").read_text()
-          assert "create_host_path: false" in compose
-          assert "propagation: rslave" in compose
-          assert "@{" not in storage
-          # Disk pressure is handled before, during and after the build.
+
           disk = Path("disk-space.sh").read_text()
           assert "buildx prune --all --force" in disk
           assert "inuse=false" in disk
-          assert "volume prune" not in disk
-          assert "system prune" not in disk
-          assert 'bash ./disk-space.sh pre' in install
-          assert 'bash ./disk-space.sh monitor' in install
-          assert 'bash ./disk-space.sh post' in install
-          assert install.index('disk-space.sh pre') < install.index('docker compose --progress plain build')
-          assert install.index('docker rm -f "$CONTAINER"') < install.index('docker compose --progress plain build')
-          assert install.index('docker image rm "$IMAGE"') < install.index('docker compose --progress plain build')
-          assert "docker volume rm" not in install
-          assert "docker volume prune" not in install
-          for file in ("Dockerfile", "Dockerfile.jetpack-7.2.0"):
-              src = Path(file).read_text()
-              assert "PIP_NO_CACHE_DIR=1" in src, file
-              assert "tar -xjf - -C /" in src, file
-              assert "apt-get clean" in src, file
-              assert "rm -rf /root/.cache/mise" in src, file
-          print("Lean image and cloud pause policy passed")
+          assert "volume prune" not in disk and "system prune" not in disk
+          print("Low-peak build, persistent upperdir, /cloud mount and safety checks passed")
           PY
       - name: Exercise rclone OAuth/mount health gate with mocks
         run: python3 tests/test_storage_gate.py
       - name: Exercise disk-pressure cleanup with mocked Docker
         run: python3 tests/test_disk_space.py
+      - name: Exercise low-peak install invariants
+        run: python3 tests/test_low_peak.py
