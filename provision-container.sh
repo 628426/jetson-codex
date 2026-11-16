@@ -20,6 +20,10 @@ managed_codex_path() {
 managed_codex_ready() {
   local packaged
   packaged="$(managed_codex_path)" || return 1
+  # The package must include its companion resources, not merely codex copied
+  # into a directory resembling the official installer layout.
+  [[ -x "$HOME/.codex/packages/standalone/current/codex-path/rg" \
+      || -x "$HOME/.codex/packages/standalone/current/codex-resources/rg" ]] || return 1
   [[ -L /usr/local/bin/codex ]] || return 1
   [[ "$(readlink -f /usr/local/bin/codex)" == "$(readlink -f "$packaged")" ]] || return 1
   /usr/local/bin/codex remote-control --help >/dev/null 2>&1
