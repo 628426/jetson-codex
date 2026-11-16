@@ -59,7 +59,10 @@ jobs:
           assert "JETSON_CODEX_MIGRATE" in install
           assert "docker compose --progress plain build" in install
           assert install.index('bash ./run-hardware.sh') < install.index('bash /opt/jetson-codex/provision-container.sh')
-          assert "docker commit" not in install.replace("# No docker commit", "# skip")
+          executable_lines = [line.strip() for line in install.splitlines()
+                              if line.strip() and not line.lstrip().startswith("#")]
+          assert all("docker commit" not in line and "docker save " not in line
+                     for line in executable_lines)
           assert "docker save " not in install
           assert "docker volume prune" not in install
           assert "bash ./disk-space.sh post" in install
