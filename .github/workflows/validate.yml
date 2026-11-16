@@ -71,6 +71,20 @@ jobs:
           assert "docker volume prune" not in install
           assert "bash ./disk-space.sh post" in install
           assert "PROVISION_HASH" in install
+          assert 'if [[ "$#" -eq 1 && "$1" == "--uninstall" ]]' in install
+          assert install.index('"--uninstall"') < install.index('[[ -f /etc/nv_tegra_release ]]')
+          assert 'bash "$REPO_DIR/uninstall.sh"' in install
+          cleanup = Path("uninstall.sh").read_text()
+          assert 'ERASE jetson-codex' in cleanup
+          assert "jetson-codex-auth" in cleanup
+          assert "jetson-codex-azure-auth" in cleanup
+          assert "buildx prune --all --force" in cleanup
+          assert "rclone config delete" not in cleanup
+          assert 'rm -rf --one-file-system -- "$REPO_DIR"' in cleanup
+          readme = Path("README.md").read_text()
+          assert 'bash ~/jetson-codex/install.sh --uninstall' in readme
+          assert 'bash -s -- --uninstall' in readme
+          assert "Remote OneDrive/Google Drive files" in readme
           assert "bash ./codex-remote.sh auto" in install
           assert install.index("codex login status") < install.index("bash ./codex-remote.sh auto")
           assert "bash ~/jetson-codex/codex-remote.sh pair" in install
@@ -135,3 +149,5 @@ jobs:
         run: python3 tests/test_low_peak.py
       - name: Exercise native Codex mobile pairing with mocked CLI
         run: python3 tests/test_codex_remote.py
+      - name: Exercise complete uninstall with mocked services
+        run: python3 tests/test_uninstall.py
