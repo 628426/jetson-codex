@@ -30,6 +30,9 @@ jobs:
           assert "nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04" in image
           assert "RUN apt-get" not in image
           assert "RUN --mount" not in image
+          assert 'cuda-compat-13-2 cuda-compat-orin-13-2' in image
+          assert 'apt-get purge -y --no-install-recommends "$pkg"' in image
+          assert image.index('cuda-compat-13-2 cuda-compat-orin-13-2') < image.index('COPY --from=mise-binary')
           assert "COPY --from=mise-binary" in image
           assert "ENV HF_HOME=/cloud/.cache/huggingface" in image
           assert "ENV NVIDIA_VISIBLE_DEVICES=all" in image
@@ -73,6 +76,10 @@ jobs:
           assert "sudo apt-get upgrade" not in toolkit
           assert "nvidia-jetpack" not in toolkit
           assert "JETSON_CODEX_MIGRATE" in install
+          assert "first_start" in install and ".State.StartedAt" in install
+          assert '"$existing_state" == created' in install
+          assert "docker rm \"$CONTAINER\"" in install
+          assert "never-started Created container" in install
           assert "docker compose --progress plain build" in install
           assert install.index('bash ./run-hardware.sh') < install.index('bash /opt/jetson-codex/provision-container.sh')
           executable_lines = [line.strip() for line in install.splitlines()
