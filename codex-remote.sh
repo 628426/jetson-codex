@@ -36,7 +36,7 @@ ensure_started() {
 }
 
 pair_now() {
-  [[ -r /dev/tty && -w /dev/tty ]] \
+  [[ ( -t 0 || -t 1 || -t 2 ) && -r /dev/tty && -w /dev/tty ]] \
     || fail "Pairing needs an interactive terminal to display the short-lived code."
   ensure_started || return 1
   printf '\n%s\n' \
@@ -68,7 +68,7 @@ auto_setup() {
     log "Remote Control unavailable; SDK setup remains intact."
     return 0
   fi
-  if ! [[ -r /dev/tty && -w /dev/tty ]]; then
+  if ! [[ ( -t 0 || -t 1 || -t 2 ) && -r /dev/tty && -w /dev/tty ]]; then
     log "No interactive terminal. Pair later: bash ~/jetson-codex/codex-remote.sh pair"
     return 0
   fi
