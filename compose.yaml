@@ -36,6 +36,13 @@ services:
       # Do not let Docker mkdir the source of a real FUSE filesystem.
       - type: bind
         source: ${HOME}/jetson-codex-cloud
+        target: /cloud
+        bind:
+          create_host_path: false
+          propagation: rslave
+      # Legacy workspace alias, mapped to the same cloud data (no duplicate files).
+      - type: bind
+        source: ${HOME}/jetson-codex-cloud
         target: /workspace/projects
         bind:
           create_host_path: false
