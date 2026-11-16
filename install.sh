@@ -128,8 +128,15 @@ if [[ -e "$REPO_DIR" ]]; then
   branch="$(git -C "$REPO_DIR" branch --show-current)"
   [[ "$branch" == "main" ]] || fail "Checkout is on '$branch', not main. Switch to main first."
   git -C "$REPO_DIR" diff --quiet && git -C "$REPO_DIR" diff --cached --quiet || fail "Tracked files have local changes. Commit/stash them before updating."
-  say "Updating existing checkout: $REPO_DIR"
-  git -C "$REPO_DIR" pull --ff-only origin main
+  local_head="$(git -C "$REPO_DIR" rev-parse HEAD)"
+  remote_head="$(git -C "$REPO_DIR" ls-remote origin refs/heads/main | awk '{print $1}')"
+  [[ "$remote_head" =~ ^[0-9a-f]{40}$ ]] || fail "Cannot verify remote main HEAD; refusing an unverified update."
+  if [[ "$local_head" == "$remote_head" ]]; then
+    say "Repository already at origin/main; skipping git pull."
+  else
+    say "Repository update available; fast-forwarding $REPO_DIR."
+    git -C "$REPO_DIR" pull --ff-only origin main
+  fi
 else
   say "Cloning $REPO_URL into $REPO_DIR"
   mkdir -p "$(dirname "$REPO_DIR")"
@@ -147,25 +154,50 @@ if (( NEED_NVIDIA_RUNTIME )); then
   sudo systemctl restart docker
   docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"' || fail "NVIDIA runtime still missing."
 fi
-if true; then
-  if [[ -f /etc/apt/apt.conf.d/20auto-upgrades ]] && grep -q 'APT::Periodic::Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades; then
-    say "Ubuntu unattended security updates already configured."
-  else
-    say "Installing Ubuntu unattended security updates."
-    sudo apt-get update
-    sudo apt-get install -y unattended-upgrades
-    printf '%s\n' 'APT::Periodic::Update-Package-Lists "1";' 'APT::Periodic::Unattended-Upgrade "1";' 'APT::Periodic::AutocleanInterval "7";' | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null
-    sudo systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
-  fi
+# Check each independent security-update prerequisite before changing it.
+if dpkg-query -W -f='\x24{Status}' unattended-upgrades 2>/dev/null | grep -Fxq 'install ok installed'; then
+  say "Ubuntu unattended-upgrades package already installed."
+else
+  say "Installing missing unattended-upgrades package."
+  sudo apt-get update
+  sudo apt-get install -y unattended-upgrades
 fi
-# Reclaim safe host-side APT package downloads from bootstrap. Never remove
-# system packages, user files, zram or swap while the 8GB Jetson is compiling.
-sudo apt-get clean || say "WARNING: Host APT cache cleanup failed."
+upgrade_conf=/etc/apt/apt.conf.d/20auto-upgrades
+if [[ -f "$upgrade_conf" ]] \
+  && grep -Eq '^[[:space:]]*APT::Periodic::Update-Package-Lists[[:space:]]+"1";' "$upgrade_conf" \
+  && grep -Eq '^[[:space:]]*APT::Periodic::Unattended-Upgrade[[:space:]]+"1";' "$upgrade_conf"; then
+  say "Ubuntu unattended security update policy already configured."
+else
+  say "Configuring Ubuntu unattended security update policy."
+  # Keep a prior configuration as a backup rather than deleting custom values.
+  [[ ! -f "$upgrade_conf" ]] || sudo cp -n "$upgrade_conf" "$upgrade_conf.jetson-codex.bak"
+  printf '%s\n' 'APT::Periodic::Update-Package-Lists "1";' 'APT::Periodic::Unattended-Upgrade "1";' 'APT::Periodic::AutocleanInterval "7";' | sudo tee "$upgrade_conf" >/dev/null
+fi
+for timer in apt-daily.timer apt-daily-upgrade.timer; do
+  if systemctl is-enabled --quiet "$timer"; then
+    say "$timer already enabled."
+  else
+    sudo systemctl enable "$timer"
+  fi
+  if systemctl is-active --quiet "$timer"; then
+    say "$timer already active."
+  else
+    sudo systemctl start "$timer"
+  fi
+done
+# Reclaim host APT package downloads only when cache contains .deb files.
+if sudo find /var/cache/apt/archives -maxdepth 1 -type f -name '*.deb' -print -quit | grep -q .; then
+  say "Cleaning downloaded APT package archives."
+  sudo apt-get clean || say "WARNING: Host APT cache cleanup failed."
+else
+  say "APT package archives already clean."
+fi
 [[ -f "$DOCKERFILE" ]] || fail "Selected Dockerfile missing: $DOCKERFILE"
 INSTALL_TMP_DIR="$(mktemp -d -t jetson-codex-install.XXXXXXXX)"
 # Do not stat/mkdir the FUSE mount yet: a broken endpoint may reject mkdir
 # before storage-health.sh gets a chance to offer interactive recovery.
-mkdir -p workspace workspace/source
+[[ -d workspace ]] || mkdir workspace
+[[ -d workspace/source ]] || mkdir workspace/source
 # Cloud setup is a dependency when selected, not an optional best-effort task.
 # NEVER start the multi-GB Docker build while requested OAuth is incomplete.
 STORAGE_ENV="${XDG_CONFIG_HOME:-$HOME/.config}/jetson-codex/storage.env"
@@ -401,9 +433,13 @@ fi
 
 # User-requested full trust: Codex may execute commands without approval prompts.
 # Persist in the existing Codex auth volume; keep the container boundary.
-say "Configuring Codex full trust (no approvals, unrestricted container filesystem)"
-docker exec "$CONTAINER" python3 /opt/jetson-codex/configure-full-trust.py \
-  || fail "Could not configure Codex full-trust defaults."
+if docker exec "$CONTAINER" python3 -c 'import pathlib,tomllib; p=pathlib.Path.home()/".codex/config.toml"; c=tomllib.loads(p.read_text()); assert c.get("approval_policy")=="never" and c.get("sandbox_mode")=="danger-full-access"' >/dev/null 2>&1; then
+  say "Codex full-trust settings already correct; skipping configuration."
+else
+  say "Configuring Codex full trust (no approvals, unrestricted container filesystem)"
+  docker exec "$CONTAINER" python3 /opt/jetson-codex/configure-full-trust.py \
+    || fail "Could not configure Codex full-trust defaults."
+fi
 
 # Interactive authentication requires a real TTY. curl | bash does not always
 # provide stdin to the script, so attach docker exec to /dev/tty explicitly.
