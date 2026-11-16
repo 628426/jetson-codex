@@ -19,9 +19,11 @@ devices() {
 }
 
 video() {
-  local tmp result=0 codec encoder parser media_type
+  local tmp result=0 codec encoder parser muxer
   tmp="$(mktemp -d /tmp/jetson-codec-XXXXXX)"
-  trap 'rm -rf "$tmp"' EXIT
+  # Capture the generated path now: EXIT runs after video() returns, when
+  # local variables are no longer in scope under set -u.
+  trap "rm -rf -- '$tmp'" EXIT
   printf '[Video] NVIDIA hardware decode plugin: '
   if ! command -v gst-inspect-1.0 >/dev/null || ! gst-inspect-1.0 nvv4l2decoder >/dev/null 2>&1; then
     echo 'FAIL (nvv4l2decoder missing)'; return 1
@@ -33,14 +35,14 @@ video() {
   # No NVENC hardware exists on Orin Nano, even if an encoder plugin appears.
   for codec in h264 h265; do
     case "$codec" in
-      h264) encoder=libx264; parser=h264parse ;;
-      h265) encoder=libx265; parser=h265parse ;;
+      h264) encoder=libx264; parser=h264parse; muxer=h264 ;;
+      h265) encoder=libx265; parser=h265parse; muxer=hevc ;;
     esac
     printf '[Video] CPU %s encode fixture: ' "$codec"
     if ! command -v ffmpeg >/dev/null || ! timeout 30 ffmpeg -nostdin -hide_banner -loglevel error \
         -f lavfi -i 'testsrc2=size=320x240:rate=10' \
         -frames:v 12 -threads 2 -c:v "$encoder" -preset ultrafast -pix_fmt yuv420p \
-        -y -f "$codec" "$tmp/sample.$codec" >"$tmp/encode-$codec.log" 2>&1; then
+        -y -f "$muxer" "$tmp/sample.$codec" >"$tmp/encode-$codec.log" 2>&1; then
       echo FAIL
       tail -n 10 "$tmp/encode-$codec.log" >&2
       result=1
