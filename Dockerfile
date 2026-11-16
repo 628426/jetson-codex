@@ -21,8 +21,8 @@ ENV GST_PLUGIN_PATH="/opt/nvidia/deepstream/deepstream-9.1/lib/gst-plugins"
 ENV LD_LIBRARY_PATH="/opt/nvidia/deepstream/deepstream-9.1/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 # Cloud model weights use rclone's existing read-through cache; keep APT,
 # dpkg and durable credentials on local Docker storage instead.
-ENV HF_HOME=/workspace/projects/.cache/huggingface \
-    TORCH_HOME=/workspace/projects/.cache/torch
+ENV HF_HOME=/cloud/.cache/huggingface \
+    TORCH_HOME=/cloud/.cache/torch
 COPY --from=mise-binary /usr/local/bin/mise /usr/local/bin/mise
 ARG JETSON_CODEX_BUILD_HASH=untracked
 LABEL org.jetson-codex.build-hash="${JETSON_CODEX_BUILD_HASH}"
