@@ -43,7 +43,11 @@ jobs:
           assert "glab@1.128.0" in provision
           assert "node@26.11.0" in provision
           assert "curl -fLSs" in provision and "tar -xjf - -C /" in provision
-          assert "codex-aarch64-unknown-linux-musl" in provision
+          assert "https://chatgpt.com/codex/install.sh" in provision
+          assert "CODEX_NON_INTERACTIVE=1 CODEX_INSTALL_DIR=/usr/local/bin" in provision
+          assert "managed_codex_ready" in provision
+          assert "packages/standalone/current/bin/codex" in provision
+          assert "codex-aarch64-unknown-linux-musl.tar.gz" not in provision
           assert "apt-get clean" in provision
           assert "provision.sha256" in provision
           assert 'bash /opt/jetson-codex/setup-versions.sh' in provision
@@ -67,6 +71,38 @@ jobs:
           assert "docker volume prune" not in install
           assert "bash ./disk-space.sh post" in install
           assert "PROVISION_HASH" in install
+          assert 'if [[ "$#" -eq 1 && "$1" == "--uninstall" ]]' in install
+          assert install.index('"--uninstall"') < install.index('[[ -f /etc/nv_tegra_release ]]')
+          assert 'bash "$REPO_DIR/uninstall.sh"' in install
+          cleanup = Path("uninstall.sh").read_text()
+          assert 'ERASE jetson-codex' in cleanup
+          assert "jetson-codex-auth" in cleanup
+          assert "jetson-codex-azure-auth" in cleanup
+          assert "buildx prune --all --force" in cleanup
+          assert "rclone config delete" not in cleanup
+          assert 'rm -rf --one-file-system -- "$REPO_DIR"' in cleanup
+          readme = Path("README.md").read_text()
+          assert 'bash ~/jetson-codex/install.sh --uninstall' in readme
+          assert 'bash -s -- --uninstall' in readme
+          assert "Never deletes cloud files." in readme
+          assert "bash ./codex-remote.sh auto" in install
+          assert install.index("codex login status") < install.index("bash ./codex-remote.sh auto")
+          assert "bash ~/jetson-codex/codex-remote.sh pair" in install
+
+          remote = Path("codex-remote.sh").read_text()
+          assert "codex remote-control start --json" in remote
+          assert "codex remote-control pair" in remote
+          assert "codex login status" in remote
+          assert "OFFERED_MARKER" in remote
+          assert "docker exec -it" in remote
+          assert ">/dev/tty" in remote and "</dev/tty" in remote
+          assert 'rm -f' not in remote
+          assert "docker rm" not in remote
+          assert "docker commit" not in remote
+          keepalive = Path("container-keepalive.sh").read_text()
+          assert "codex remote-control start --json" in keepalive
+          assert "codex login status" in keepalive
+          assert "exec sleep infinity" in keepalive
 
           launch = Path("run-hardware.sh").read_text()
           assert 'target=/cloud,bind-propagation=rslave' in launch
@@ -74,6 +110,8 @@ jobs:
           assert "manual migration required" in launch
           assert 'docker rm -f "$container"' not in launch
           assert "docker start" in launch
+          assert 'bash /opt/jetson-codex/container-keepalive.sh' in launch
+          assert 'command: ["bash", "/opt/jetson-codex/container-keepalive.sh"]' in Path("compose.yaml").read_text()
           assert 'target=/opt/jetson-codex,readonly' in launch
           compose = Path("compose.yaml").read_text()
           assert "target: /cloud" in compose and "target: /workspace/projects" in compose
@@ -109,3 +147,7 @@ jobs:
         run: python3 tests/test_disk_space.py
       - name: Exercise low-peak install invariants
         run: python3 tests/test_low_peak.py
+      - name: Exercise native Codex mobile pairing with mocked CLI
+        run: python3 tests/test_codex_remote.py
+      - name: Exercise complete uninstall with mocked services
+        run: python3 tests/test_uninstall.py

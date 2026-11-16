@@ -7,8 +7,29 @@ export DEBIAN_FRONTEND=noninteractive
 hash="${JETSON_CODEX_PROVISION_HASH:-}"
 [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || { echo "Missing valid provision hash" >&2; exit 2; }
 marker=/var/lib/jetson-codex/provision.sha256
+# Remote Control requires a complete installer-managed Codex package, not the
+# raw executable previously downloaded into /usr/local/bin.
+managed_codex_path() {
+  local candidate
+  for candidate in "$HOME/.codex/packages/standalone/current/bin/codex" \
+                   "$HOME/.codex/packages/standalone/current/codex"; do
+    if [[ -x "$candidate" ]]; then printf '%s\n' "$candidate"; return 0; fi
+  done
+  return 1
+}
+managed_codex_ready() {
+  local packaged
+  packaged="$(managed_codex_path)" || return 1
+  # The package must include its companion resources, not merely codex copied
+  # into a directory resembling the official installer layout.
+  [[ -x "$HOME/.codex/packages/standalone/current/codex-path/rg" \
+      || -x "$HOME/.codex/packages/standalone/current/codex-resources/rg" ]] || return 1
+  [[ -L /usr/local/bin/codex ]] || return 1
+  [[ "$(readlink -f /usr/local/bin/codex)" == "$(readlink -f "$packaged")" ]] || return 1
+  /usr/local/bin/codex remote-control --help >/dev/null 2>&1
+}
 if [[ -f "$marker" && "$(cat "$marker")" == "$hash" ]] \
-  && command -v nvcc >/dev/null && command -v codex >/dev/null \
+  && command -v nvcc >/dev/null && managed_codex_ready \
   && command -v gh >/dev/null && command -v glab >/dev/null \
   && command -v az >/dev/null \
   && test -x /opt/nvidia/deepstream/deepstream-9.1/bin/deepstream-app; then
@@ -189,17 +210,19 @@ else
   log 'Node.js and front-end tools already installed.'
 fi
 
-if ! command -v codex >/dev/null 2>&1; then
-log 'Streaming standalone ARM64 Codex CLI.'
-curl -fLSs --retry 3 \
-  'https://github.com/openai/codex/releases/latest/download/codex-aarch64-unknown-linux-musl.tar.gz' \
-  | tar -xzf - -C /usr/local/bin
-mv /usr/local/bin/codex-aarch64-unknown-linux-musl /usr/local/bin/codex
-chmod 0755 /usr/local/bin/codex
-codex --version
+if managed_codex_ready; then
+  log 'Complete installer-managed Codex package already present; skipping install.'
 else
-  log 'Codex CLI already present.'
+  log 'Installing official complete Codex package (required for Remote Control).'
+  # Reuse the existing /root/.codex Docker auth volume for the managed
+  # standalone package and app-server daemon metadata. The old unpacked
+  # /usr/local/bin/codex file is atomically replaced by the official CLI
+  # installer with a symlink to the managed package.
+  export CODEX_NON_INTERACTIVE=1 CODEX_INSTALL_DIR=/usr/local/bin
+  curl -fsSL --retry 3 https://chatgpt.com/codex/install.sh | sh
+  managed_codex_ready || fail 'Official Codex installer did not produce a complete managed package.'
 fi
+codex --version
 
 # Keep live scripts in the read-only host bind. Only the executable shim is
 # stored in this container's writable filesystem.

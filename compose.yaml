@@ -14,7 +14,7 @@ services:
     # Persistent writable layer contains post-up APT/SDK packages.
     # WARNING: compose down/recreate destroys that layer. Use install.sh instead.
     # Keep the container alive; enter on demand using docker exec.
-    command: ["sleep", "infinity"]
+    command: ["bash", "/opt/jetson-codex/container-keepalive.sh"]
     # Host networking retained for local development tools and camera services.
     network_mode: host
     stdin_open: true

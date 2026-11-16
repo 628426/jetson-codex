@@ -37,7 +37,21 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 
-(( $# == 0 )) || fail "No parameters supported. Run install.sh without arguments."
+# Only one installer option: --uninstall. Handle it before JetPack,
+# Docker, network and cloud health checks, including on incomplete installs.
+if [[ "$#" -eq 1 && "$1" == "--uninstall" ]]; then
+  [[ "$EUID" -ne 0 ]] || fail "Run uninstall as the installing user, not root."
+  if [[ -f "$REPO_DIR/uninstall.sh" ]]; then
+    bash "$REPO_DIR/uninstall.sh"
+  else
+    # A checkout may be absent or partially installed; the verified main
+    # helper can still remove project-specific Docker/systemd resources.
+    curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/uninstall.sh |
+      bash || fail "Cannot run uninstall helper."
+  fi
+  exit 0
+fi
+(( $# == 0 )) || fail "Usage: install.sh [--uninstall]"
 [[ $EUID -ne 0 ]] || fail "Run as your normal account, not sudo."
 [[ "$(uname -s)" == "Linux" ]] || fail "Linux is required."
 [[ -f /etc/os-release ]] || fail "Cannot identify host OS."
@@ -471,6 +485,12 @@ else
   fi
 fi
 
+# After ChatGPT login, enable Codex's native Remote Control daemon and offer
+# a short-lived mobile pairing code once. Not an SSH wrapper or host Codex install.
+# The helper records that a CODE WAS OFFERED, never claims the phone is paired.
+say "Checking Codex Remote Control and mobile pairing."
+bash ./codex-remote.sh auto || say "WARNING: Remote Control unavailable; continue with SDK verification."
+
 # Offer the provider menu once. Credentials and SSH keys persist in named volumes.
 if [[ -r /dev/tty && -w /dev/tty ]] && ! docker exec "$CONTAINER" test -f /root/.ssh/.jetson-providers-offered; then
   printf '\n%s\n' 'Codex supports GitHub, GitHub Enterprise, GitLab, Bitbucket and Azure DevOps.' >/dev/tty
@@ -525,6 +545,11 @@ Enter it:
 Codex device login (if still required):
   docker exec -it jetson-codex codex login --device-auth
   https://auth.openai.com/codex/device
+
+ChatGPT mobile pairing (use after logging into Codex):
+  bash ~/jetson-codex/codex-remote.sh pair
+  # Enter the short-lived code in ChatGPT mobile Codex/Remote.
+  # A new code is only generated when requested after the first offer.
 
 GitHub CLI login (separate, once):
   docker exec -it jetson-codex gh auth login --hostname github.com --git-protocol https --web
