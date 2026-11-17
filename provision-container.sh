@@ -167,25 +167,37 @@ else
   log 'GitLab CLI already pinned.'
 fi
 
+# Azure CLI is a separate, resumable step. Network failures must not corrupt
+# an existing Microsoft GPG keyring or require another SDK/container rebuild.
 if ! command -v az >/dev/null 2>&1; then
-log 'Installing Microsoft Azure CLI and DevOps extension.'
-curl -fsSL --retry 3 https://packages.microsoft.com/keys/microsoft.asc \
-  | gpg --batch --yes --dearmor -o /etc/apt/keyrings/microsoft-azure.gpg
-chmod 0644 /etc/apt/keyrings/microsoft-azure.gpg
-printf 'deb [arch=arm64 signed-by=/etc/apt/keyrings/microsoft-azure.gpg] https://packages.microsoft.com/repos/azure-cli/ noble main\n' \
-  > /etc/apt/sources.list.d/azure-cli.list
-apt-get update
-apt-get install -y --no-install-recommends azure-cli
-apt-get clean
-rm -rf /var/lib/apt/lists/*
-az --version
+  log 'Installing Microsoft Azure CLI (safe DNS retries, verified keyring).'
+  bash /opt/jetson-codex/install-azure-cli.sh ||
+    fail 'Azure CLI package download failed. Retry this same installer after DNS/HTTPS recovers.'
+else
+  log 'Azure CLI already installed; skipping APT.'
 fi
-if ! az extension show --name azure-devops --query name -o tsv >/dev/null 2>&1; then
-  log 'Installing Azure DevOps extension.'
+
+if az extension show --name azure-devops --query name -o tsv >/dev/null 2>&1; then
+  log 'Azure DevOps extension already installed.'
+else
+  log 'Installing Azure DevOps extension with bounded retries.'
   mkdir -p /opt/azure-cli-extensions
-  az extension add --name azure-devops --yes
+  azure_extension_ok=0
+  for attempt in 1 2 3; do
+    if az extension add --name azure-devops --yes; then
+      azure_extension_ok=1
+      break
+    fi
+    if (( attempt < 3 )); then
+      log "Azure extension download failed (attempt $attempt/3); retrying."
+      sleep $(( attempt * 3 ))
+    fi
+  done
+  (( azure_extension_ok )) ||
+    fail 'Azure DevOps extension unreachable. Installed packages retained; rerun after network recovers.'
 fi
-az extension show --name azure-devops --query name -o tsv
+az extension show --name azure-devops --query name -o tsv >/dev/null ||
+  fail 'Azure DevOps extension still unavailable.'
 rm -rf /root/.cache/azure /root/.cache/pip
 
 log 'Installing Python 3.12 tools (no duplicate Python runtime).'
