@@ -7,7 +7,7 @@ set -Eeuo pipefail
 log(){ printf '[azure-bootstrap] %s\n' "$*"; }
 fail(){ log "ERROR: $*" >&2; exit 1; }
 
-if command -v az >/dev/null 2>&1; then
+if command -v az >/dev/null 2>&1 && az --version >/dev/null 2>&1; then
   log 'Azure CLI already installed; no APT changes.'
   exit 0
 fi
