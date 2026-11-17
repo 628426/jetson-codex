@@ -269,8 +269,11 @@ fi
 # Keep independent hashes: helper/provision changes must not rebuild CUDA base.
 [[ -f "$DOCKERFILE" ]] || fail "Selected base Dockerfile missing."
 [[ -f provision-container.sh ]] || fail "Post-up provisioning script missing."
+[[ -f install-azure-cli.sh ]] || fail "Azure CLI provisioning helper missing."
 export JETSON_CODEX_BUILD_HASH="$(sha256sum "$DOCKERFILE" | awk '{print $1}')"
-PROVISION_HASH="$(sha256sum provision-container.sh | awk '{print $1}')"
+# Changes to either provisioning script must trigger a health reconciliation,
+# but never rebuild the minimal CUDA base or delete its persistent container.
+PROVISION_HASH="$(sha256sum provision-container.sh install-azure-cli.sh | sha256sum | awk '{print $1}')"
 PROVISIONED=0
 # A one-time legacy migration deletes the previous full-image container's
 # writable layer. This is NEVER automatic even if all named volumes are safe.

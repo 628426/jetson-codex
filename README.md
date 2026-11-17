@@ -328,6 +328,42 @@ inside its persistent writable filesystem, then offers ChatGPT pairing after
 Codex sign-in. Do not use `docker compose down` as a reset: it would remove
 the SDK filesystem without cleaning up associated credentials/configuration.
 
+## Azure CLI download and DNS recovery
+
+Azure CLI and the Azure DevOps extension are installed **after** the container
+starts, not in the CUDA base image. An intermittent failure resolving
+`packages.microsoft.com` does **not** mean the NVIDIA SDK needs rebuilding.
+
+The installer now downloads Microsoft's signing key into a temporary file,
+retries DNS/TLS failures with a bounded timeout, verifies the published
+Microsoft signing-key fingerprint, then atomically replaces the APT keyring.
+A failed download leaves the existing key and APT sources untouched. It
+checks installed tools on each rerun, so successful GitHub/GitLab/DeepStream
+steps are preserved.
+
+If Azure download fails, check name resolution from both environments:
+
+```bash
+getent ahostsv4 packages.microsoft.com
+docker exec jetson-codex getent ahostsv4 packages.microsoft.com
+docker exec jetson-codex cat /etc/resolv.conf
+```
+
+If the host succeeds but the container fails, investigate Docker's generated
+`/etc/resolv.conf` and the nameserver it lists. With host networking, the
+container still has its own resolver file. Do **not** blindly change the host
+DNS or remove the persistent Docker container.
+
+Once connectivity returns, use the same installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/628426/jetson-codex/main/install.sh | bash
+```
+
+The provisioner resumes after the last successful package group; it does not
+duplicate an image or delete previously installed tools. If the network is
+still unavailable, it fails clearly and retains the container for another try.
+
 ## One command, every time
 
 Run the same command for initial setup, repair and health checks:
