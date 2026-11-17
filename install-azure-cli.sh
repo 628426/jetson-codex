@@ -16,8 +16,8 @@ fi
 key_url='https://packages.microsoft.com/keys/microsoft.asc'
 repo_url='https://packages.microsoft.com/repos/azure-cli/'
 expected_fingerprint='BC528686B50D79E339D3721CEB3E94ADBE1229CF'
-keyring_dir="\${AZURE_KEYRING_DIR:-/etc/apt/keyrings}"
-sources_dir="\${AZURE_SOURCES_DIR:-/etc/apt/sources.list.d}"
+keyring_dir="${AZURE_KEYRING_DIR:-/etc/apt/keyrings}"
+sources_dir="${AZURE_SOURCES_DIR:-/etc/apt/sources.list.d}"
 keyring="$keyring_dir/microsoft-azure.gpg"
 source_file="$sources_dir/azure-cli.list"
 
