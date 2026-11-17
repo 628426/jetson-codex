@@ -63,6 +63,18 @@ jobs:
           assert "Cloud setup failed or was interrupted. Docker build NOT started." in install
           assert install.index("bash ./storage-health.sh") < install.index("BUILD_INPUTS=") if "BUILD_INPUTS=" in install else True
           assert "provision-container.sh" in install
+          assert "install-azure-cli.sh" in install
+          assert 'sha256sum provision-container.sh install-azure-cli.sh' in install
+          assert "bash /opt/jetson-codex/install-azure-cli.sh" in provision
+          assert "Azure DevOps extension with bounded retries" in provision
+          azure = Path("install-azure-cli.sh").read_text()
+          assert "curl --fail --silent --show-error --location" in azure
+          assert "--retry-all-errors" in azure
+          assert "--output" in azure
+          assert "BC528686B50D79E339D3721CEB3E94ADBE1229CF" in azure
+          assert "gpg --batch --with-colons --show-keys" in azure
+          assert 'mv -f -- "$staged_key" "$keyring"' in azure
+          assert "APT::Update::Error-Mode=any" in azure
           assert 'bash ./check-nvidia-toolkit.sh' in install
           assert install.index('bash ./check-nvidia-toolkit.sh') < install.index('bash ./run-hardware.sh')
           toolkit = Path("check-nvidia-toolkit.sh").read_text()
@@ -173,3 +185,5 @@ jobs:
 
       - name: Test Orin CUDA compat host toolkit recovery (mock APT)
         run: python3 tests/test_nvidia_toolkit.py
+      - name: Test Azure CLI DNS recovery, key integrity and idempotency
+        run: python3 tests/test_azure_install.py
