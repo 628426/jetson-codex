@@ -169,7 +169,7 @@ fi
 
 # Azure CLI is a separate, resumable step. Network failures must not corrupt
 # an existing Microsoft GPG keyring or require another SDK/container rebuild.
-if ! command -v az >/dev/null 2>&1; then
+if ! command -v az >/dev/null 2>&1 || ! az --version >/dev/null 2>&1; then
   log 'Installing Microsoft Azure CLI (safe DNS retries, verified keyring).'
   bash /opt/jetson-codex/install-azure-cli.sh ||
     fail 'Azure CLI package download failed. Retry this same installer after DNS/HTTPS recovers.'
